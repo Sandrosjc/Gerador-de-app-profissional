@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chequetto — Super Plataforma</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+  <!-- ===================== BANCADA ESQUERDA ===================== -->
+  <aside class="bench">
+    <div class="bench__brand">
+      <div class="brand__mark">C</div>
+      <div>
+        <p class="brand__title">CHEQUETTO</p>
+        <p class="brand__subtitle" id="apiStatus">verificando servidor...</p>
+      </div>
+      <label class="language-picker" for="languageSelector">
+        <span class="sr-only">Idioma</span>
+        <span class="language-picker__flags" aria-label="Escolher idioma">
+          <button class="language-picker__flag" type="button" data-language="en" title="English" aria-label="English">🇺🇸</button>
+          <button class="language-picker__flag" type="button" data-language="pt" title="Português" aria-label="Português">🇧🇷</button>
+        </span>
+        <select id="languageSelector" aria-label="Idioma">
+          <option value="pt">PT</option><option value="en">EN</option><option value="es">ES</option><option value="fr">FR</option><option value="de">DE</option><option value="it">IT</option><option value="ja">JA</option><option value="zh">中文</option><option value="ko">한국어</option><option value="ru">RU</option><option value="ar">AR</option><option value="hi">HI</option>
+        </select>
+      </label>
+      <div id="accountArea"></div>
+    </div>
+    <div class="workspace-nav" aria-label="Navegação do workspace">
+      <button class="workspace-nav__item is-active" type="button"><span>✦</span> Criar aplicativo</button>
+      <button class="workspace-nav__item" type="button" id="btnMeusProjetos"><span>▦</span> Meus projetos</button>
+    </div>
+    <div class="bench__eyebrow"><span class="eyebrow__dot"></span> Super Platform 2026 <span class="eyebrow__status">online</span></div>
+    <div>
+      <label class="field__label" for="prompt" data-i18n="hero">O que vamos construir hoje?</label>
+      <div class="prompt-wrap">
+        <textarea id="prompt" rows="6" data-i18n-placeholder="prompt" placeholder="Descreva seu app com o máximo de detalhes: objetivo, público, telas, campos, regras, cores, textos, botões e integrações..."></textarea>
+        <label class="btn-attach" for="fileAttach" title="Adicionar arquivos" aria-label="Adicionar arquivos">+<input id="fileAttach" type="file" multiple hidden></label>
+        <button type="button" class="btn-mic" id="btnMic" title="Falar em vez de digitar" aria-label="Falar em vez de digitar">🎙</button>
+      </div>
+      <div class="attached-files" id="attachedFiles" hidden></div>
+      <p class="field__hint" id="micHint">Cole código, descreva seu app ou anexe arquivos para começar.</p>
+    </div>
+    <div class="bench__tips" id="aiTips">
+      <p class="examples__title" data-i18n="tips">Dicas da IA</p>
+      <button class="chip" data-tip="Adicione login e cadastro de usuários">Login e cadastro</button>
+      <button class="chip" data-tip="Adicione busca, filtros e ordenação">Busca e filtros</button>
+      <button class="chip" data-tip="Adicione modo escuro e modo claro">Modo claro/escuro</button>
+      <button class="chip" data-tip="Adicione exportação para PDF e Excel">Exportar dados</button>
+    </div>
+    <button class="btn-primary" id="btnGerar">
+      <span class="spinner" id="spinner" hidden></span>
+      <span id="btnGerarLabel" data-i18n="generate">Gerar App</span>
+    </button>
+
+    <!-- ===================== BARRA DE ETAPAS ===================== -->
+    <div class="stage-bar" id="stageBar" hidden>
+      <div class="stage-bar__step" id="stagePlanejar">
+        <span class="stage-bar__dot"></span>
+        <span class="stage-bar__label">Planejando</span>
+      </div>
+      <div class="stage-bar__line"></div>
+      <div class="stage-bar__step" id="stageCriar">
+        <span class="stage-bar__dot"></span>
+        <span class="stage-bar__label">Criando</span>
+      </div>
+    </div>
+    <ul class="plano-list" id="planoList" hidden></ul>
+
+    <p class="bench__status" id="status"></p>
+    <div class="bench__history">
+      <p class="history__label">Histórico</p>
+      <ul class="history__list" id="historyList"></ul>
+    </div>
+    <div class="bench__footer">Oficina v1.0</div>
+  </aside>
+  <!-- ===================== PALCO / PREVIEW ===================== -->
+  <main class="stage">
+    <div class="stage__bar">
+      <div class="stage__tabs">
+        <button class="tab is-active" data-view="preview" data-i18n="preview">Prévia</button>
+        <button class="tab" data-view="code" data-i18n="code">Código</button>
+      </div>
+      <div class="stage__devices">
+        <button class="device is-active" data-width="100%" title="Desktop" data-i18n="desktop">Desktop</button>
+        <button class="device" data-width="768px" title="Tablet" data-i18n="tablet">Tablet</button>
+        <button class="device" data-width="375px" title="Celular" data-i18n="mobile">Celular</button>
+      </div>
+      <div class="stage__actions">
+        <button class="btn-ghost" id="btnShareWhatsapp" type="button">📲 WhatsApp</button>
+        <button class="btn-ghost" id="btnCopiar" disabled data-i18n="copy">Copiar código</button>
+        <button class="btn-ghost" id="btnBaixar" disabled data-i18n="download">Baixar .html</button>
+        <button class="btn-secondary" id="btnSalvar" disabled data-i18n="save">Salvar na Oficina</button>
+      </div>
+    </div>
+    <div class="stage__context">
+      <div><span class="context__label">ESTÚDIO</span><strong>Seu aplicativo, em tempo real</strong></div>
+      <span class="context__hint">Descreva. Gere. Refine.</span>
+    </div>
+    <div class="stage__viewport">
+      <div class="frame-wrap" id="frameWrap">
+        <iframe id="previewFrame" hidden></iframe>
+        <pre class="code-view" id="codeView" hidden><code id="codeViewText"></code></pre>
+      </div>
+      <div class="empty-state" id="emptyState">
+        <div class="conversion-carousel" aria-live="polite">
+          <span class="carousel-kicker">CHEQUETTO AI STUDIO</span>
+          <p><strong id="carouselTitle">Transforme uma ideia em um app funcional</strong></p>
+          <p class="empty-state__sub" id="carouselDescription">Descreva seu objetivo e a IA monta telas, componentes e interações para você testar agora.</p>
+          <div class="carousel-benefit" id="carouselBenefit">Comece grátis com 20 créditos e refine o resultado conversando.</div>
+          <button class="carousel-cta" id="carouselCta" type="button">Começar grátis</button>
+          <div class="carousel-dots" id="carouselDots" aria-label="Benefícios do Chequetto"></div>
+        </div>
+        <div class="build-promise" id="buildPromise">Sua ideia vira um aplicativo funcional, pronto para testar e refinar.</div>
+        <div class="keyword-loop" aria-hidden="true"><span id="rotatingKeyword">ideias em aplicativos</span></div>
+      </div>
+    </div>
+    <div class="stage__refine">
+      <div class="refine__text">
+        <span class="refine__spark">✦</span>
+        <small>Para corrigir o app, use esta caixa abaixo e escreva: "corrija tudo" ou peça ajustes específicos.</small>
+      </div>
+      <input id="refineInput" type="text" data-i18n-placeholder="refinePlaceholder" placeholder="Peça uma alteração no app gerado..." autocomplete="off">
+      <button class="btn-secondary" id="btnRefinar" disabled data-i18n="refine">Aplicar alteração</button>
+    </div>
+  </main>
+</div>
+
+<!-- ===================== JANELA DE LOGIN / CADASTRO ===================== -->
+<div class="modal-overlay" id="authModalOverlay" hidden>
+  <div class="auth-modal" id="authModal">
+    <button class="auth-modal__close" id="closeAuthModal">×</button>
+    <div class="auth-layout">
+      <section class="auth-panel">
+        <p class="auth-kicker">CHEQUETTO / ACESSO</p>
+        <h2 id="authTitle">Entre para construir.</h2>
+        <p class="auth-lead" id="authLead">Seu trabalho fica salvo e você pode continuar de onde parou. Entre com e-mail ou GitHub.</p>
+
+        <div class="social-login">
+          <button class="social-login__button" id="btnGithubAuth" type="button">Continuar com GitHub</button>
+        </div>
+        <div class="auth-divider"><span>ou</span></div>
+
+        <form id="formEmailRequest">
+          <div class="auth-field"><label for="authEmail">E-mail</label><input type="email" id="authEmail" name="email" autocomplete="email" placeholder="Digite seu e-mail" required></div>
+          <input type="hidden" id="authReferralCode" name="referralCode">
+          <p class="auth-error" id="emailRequestError"></p>
+          <button class="btn-primary auth-submit" type="submit">Continuar com e-mail</button>
+        </form>
+        <form id="formEmailVerify" hidden>
+          <div class="auth-field"><label for="authVerificationCode">Código de verificação</label><input type="text" id="authVerificationCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="Digite o código recebido" required></div>
+          <p class="auth-error" id="emailVerifyError"></p>
+          <button class="btn-primary auth-submit" type="submit">Confirmar código</button>
+        </form>
+      </section>
+      <section class="plans-panel">
+        <p class="auth-kicker">PLANOS</p>
+        <h2>Escolha seu ritmo.</h2>
+        <p class="auth-lead">Comece pequeno e aumente quando seu produto crescer.</p>
+        <div class="plan-list">
+          <button class="plan-card" type="button" data-plan="gratis">
+            <span class="plan-card__name">Grátis</span><strong>R$ 0<span>/sempre</span></strong>
+            <small>Comece a criar sem custo</small>
+          </button>
+          <button class="plan-card plan-card--featured" type="button" data-plan="mensal">
+            <span class="plan-card__badge">MAIS ESCOLHIDO</span><span class="plan-card__name">Mensal</span><strong>R$ 29,90<span>/mês</span></strong>
+            <small>Criação contínua e recursos completos</small>
+          </button>
+          <button class="plan-card" type="button" data-plan="trimestral">
+            <span class="plan-card__name">Trimestral</span><strong>R$ 79,90<span>/trimestre</span></strong>
+            <small>Economize no pagamento antecipado</small>
+          </button>
+          <button class="plan-card" type="button" data-plan="anual">
+            <span class="plan-card__name">Anual</span><strong>R$ 299,90<span>/ano</span></strong>
+            <small>Melhor valor para projetos longos</small>
+          </button>
+          <button class="plan-card" type="button" data-plan="vitalicio_regular">
+            <span class="plan-card__name">Vitalício</span><strong>R$ 980,00<span>/único</span></strong>
+            <small>Acesso completo sem mensalidade</small>
+          </button>
+        </div>
+        <div class="lifetime-offer" id="lifetimeOffer">
+          <span class="lifetime-offer__tag" id="offerTag">OFERTA ESPECIAL</span>
+          <strong id="offerTitle">Acesso vitalício por R$ 390,00</strong>
+          <small><span id="offerRemaining">Condição promocional disponível por mais</span> <b id="offerCountdown">7d 00:00:00</b></small>
+          <button class="btn-primary lifetime-offer__button" id="offerButton" type="button" data-plan="vitalicio_promo">Garantir acesso vitalício</button>
+        </div>
+        <p class="plan-note" id="planNote">Selecione um plano para continuar.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="checkout-overlay" id="checkoutModalOverlay" hidden>
+  <div class="checkout-sheet" id="checkoutModal">
+    <button class="auth-modal__close" id="closeCheckoutModal">×</button>
+    <div class="checkout-header">
+      <p class="auth-kicker">PAGAMENTO</p>
+      <h2>Finalize seu plano</h2>
+      <p class="auth-lead">Escolha o melhor ritmo e confirme o cadastro com a melhor experiência.</p>
+    </div>
+    <div class="checkout-layout">
+      <section class="checkout-plans">
+        <button class="checkout-plan" type="button" data-checkout-plan="gratis">
+          <span>Grátis</span><strong>R$ 0<span>/sempre</span></strong>
+        </button>
+        <button class="checkout-plan is-selected" type="button" data-checkout-plan="mensal">
+          <span>Mensal</span><strong>R$ 29,90<span>/mês</span></strong>
+        </button>
+        <button class="checkout-plan" type="button" data-checkout-plan="trimestral">
+          <span>Trimestral</span><strong>R$ 79,90<span>/trimestre</span></strong>
+        </button>
+        <button class="checkout-plan" type="button" data-checkout-plan="anual">
+          <span>Anual</span><strong>R$ 299,90<span>/ano</span></strong>
+        </button>
+        <button class="checkout-plan" type="button" data-checkout-plan="vitalicio_regular">
+          <span>Vitalício</span><strong>R$ 980,00<span>/único</span></strong>
+        </button>
+      </section>
+      <aside class="checkout-summary">
+        <p class="checkout-summary__label">Resumo</p>
+        <div class="summary-row">
+          <span>Plano</span>
+          <strong id="checkoutPlanName">Mensal</strong>
+        </div>
+        <div class="summary-row">
+          <span>Valor</span>
+          <strong id="checkoutPlanValue">R$ 29,90</strong>
+        </div>
+        <div class="summary-row">
+          <span>Frequência</span>
+          <strong id="checkoutPlanFrequency">por mês</strong>
+        </div>
+        <button class="btn-primary checkout-confirm" id="btnConfirmCheckout" type="button">Confirmar plano</button>
+      </aside>
+    </div>
+  </div>
+</div>
+
+<script src="i18n.js?v=20260825-2"></script>
+<script src="script.js?v=20260825-2"></script>
+<script src="conta.js?v=20260825-2"></script>
+</body>
+</html>

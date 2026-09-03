@@ -1,0 +1,15 @@
+{
+  "name": "Super Plataforma Core",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "humao.rest-client",
+        "ms-python.python"
+      ]
+    }
+  },
+  "postCreateCommand": "pip install fastapi uvicorn pymupdf python-docx openpyxl requests"
+}

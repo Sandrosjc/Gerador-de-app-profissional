@@ -1,0 +1,8 @@
+{
+  "gratis": { "id": "gratis", "name": "Grátis", "amount": 0.00, "currency": "BRL", "interval": "forever", "type": "sempre", "label": "R$ 0", "frequency": "sempre" },
+  "mensal": { "id": "mensal", "name": "Mensal", "amount": 29.90, "currency": "BRL", "interval": "month", "type": "recorrente_mensal", "label": "R$ 29,90", "frequency": "por mês" },
+  "trimestral": { "id": "trimestral", "name": "Trimestral", "amount": 79.90, "currency": "BRL", "interval": "quarter", "type": "trimestral", "label": "R$ 79,90", "frequency": "por trimestre" },
+  "anual": { "id": "anual", "name": "Anual", "amount": 299.90, "currency": "BRL", "interval": "year", "type": "anual", "label": "R$ 299,90", "frequency": "por ano" },
+  "vitalicio_promo": { "id": "vitalicio_promo", "name": "Acesso Vitalício (Oferta Especial)", "amount": 390.00, "currency": "BRL", "interval": "lifetime", "type": "unico", "label": "R$ 390,00", "frequency": "pagamento único" },
+  "vitalicio_regular": { "id": "vitalicio_regular", "name": "Vitalício (Padrão)", "amount": 980.00, "currency": "BRL", "interval": "lifetime", "type": "unico", "label": "R$ 980,00", "frequency": "pagamento único" }
+}
