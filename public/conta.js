@@ -1,20 +1,13 @@
-// conta.js — controla login, cadastro, seleção de plano e pagamento
+// conta.js — créditos por IP (sem login) + vitrine de planos.
+// O checkout de pagamento (Asaas) dependia de contas de usuário; como o
+// login foi removido, ele fica pausado por enquanto (ver aviso no clique
+// de um plano pago) até decidirmos como identificar quem pagou sem conta.
 
 document.addEventListener('DOMContentLoaded', () => {
   const el = {
     accountArea: document.getElementById('accountArea'),
     modalOverlay: document.getElementById('authModalOverlay'),
     modal: document.getElementById('authModal'),
-    authTitle: document.getElementById('authTitle'),
-    authLead: document.getElementById('authLead'),
-    btnGithubAuth: document.getElementById('btnGithubAuth'),
-    formEmailRequest: document.getElementById('formEmailRequest'),
-    authEmail: document.getElementById('authEmail'),
-    authReferralCode: document.getElementById('authReferralCode'),
-    emailRequestError: document.getElementById('emailRequestError'),
-    formEmailVerify: document.getElementById('formEmailVerify'),
-    authVerificationCode: document.getElementById('authVerificationCode'),
-    emailVerifyError: document.getElementById('emailVerifyError'),
     planNote: document.getElementById('planNote'),
     closeModal: document.getElementById('closeAuthModal'),
     checkoutModalOverlay: document.getElementById('checkoutModalOverlay'),
@@ -34,14 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
     vitalicio_regular: { name: 'Vitalício (Padrão)', value: 'R$ 980,00', frequency: 'pagamento único' },
   };
 
-  let currentUser = null;
-  let authRequestVersion = 0;
-  let authLoading = true;
-  let resolveAuthReady;
-  const authReady = new Promise((resolve) => {
-    resolveAuthReady = resolve;
-  });
-  let pendingAction = null;
+  let currentCredits = null;
   let selectedPlan = 'mensal';
 
   function startOfferCountdown() {
@@ -78,61 +64,37 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function continuePendingAction() {
-    if (!pendingAction) return;
-    const next = pendingAction;
-    pendingAction = null;
-    next();
-  }
-
   function renderAccountArea() {
     if (!el.accountArea) return;
+    const creditsLabel = currentCredits ?? '...';
+    el.accountArea.innerHTML = `
+      <div class="account-chip account-chip--guest">
+        <span class="account-chip__credits" title="Créditos grátis restantes">⚡ ${creditsLabel}</span>
+        <button class="btn-secondary btn-secondary--small" id="btnVerPlanos">Planos</button>
+      </div>
+    `;
+    document.getElementById('btnVerPlanos')?.addEventListener('click', openPlans);
+  }
 
-    if (currentUser) {
-      const creditsLabel = currentUser.unlimited ? '∞' : (currentUser.credits ?? 0);
-      el.accountArea.innerHTML = `
-        <div class="account-chip">
-          <span class="account-chip__credits" title="Créditos disponíveis">⚡ ${creditsLabel}</span>
-          <span class="account-chip__email">${currentUser.email}</span>
-          <button class="btn-ghost btn-ghost--small" id="btnInvite" title="Compartilhar convite">+20</button>
-          <button class="btn-ghost btn-ghost--small" id="btnLogout">Sair</button>
-        </div>
-      `;
-      document.getElementById('btnInvite')?.addEventListener('click', () => {
-        const link = `${window.location.origin}/?convite=${encodeURIComponent(currentUser.referralCode)}`;
-        const text = encodeURIComponent(`Crie seu aplicativo grátis no Chequetto e ganhe 20 créditos: ${link}`);
-        window.open(`https://wa.me/?text=${text}`, '_blank', 'noopener,noreferrer');
-      });
-      document.getElementById('btnLogout')?.addEventListener('click', async () => {
-        try {
-          await fetch('/api/auth/logout', { method: 'POST' });
-        } finally {
-          currentUser = null;
-          window.dispatchEvent(new CustomEvent('chequetto:logged-out'));
-          renderAccountArea();
-        }
-      });
-    } else {
-      el.accountArea.innerHTML = `
-        <div class="account-chip account-chip--guest">
-          <span class="account-chip__credits" title="Créditos grátis">⚡ 20</span>
-          <button class="btn-secondary btn-secondary--small" id="btnAbrirLogin">Entrar</button>
-        </div>
-      `;
-      document.getElementById('btnAbrirLogin')?.addEventListener('click', openModal);
+  async function refreshCredits() {
+    try {
+      const res = await fetch('/api/credits');
+      if (!res.ok) return;
+      const data = await res.json();
+      currentCredits = data.credits;
+      renderAccountArea();
+    } catch {
+      // silencioso — não é crítico pra experiência
     }
   }
 
-  function openModal() {
+  function openPlans() {
     if (!el.modalOverlay) return;
     el.modalOverlay.hidden = false;
-    resetAuthForms();
   }
 
-  function closeModal() {
+  function closePlans() {
     if (el.modalOverlay) el.modalOverlay.hidden = true;
-    if (el.emailRequestError) el.emailRequestError.textContent = '';
-    if (el.emailVerifyError) el.emailVerifyError.textContent = '';
   }
 
   function openCheckout(planName = selectedPlan) {
@@ -145,76 +107,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.checkoutModalOverlay) el.checkoutModalOverlay.hidden = true;
   }
 
-  function resetAuthForms() {
-    if (el.formEmailRequest) el.formEmailRequest.hidden = false;
-    if (el.formEmailVerify) el.formEmailVerify.hidden = true;
-    if (el.emailRequestError) el.emailRequestError.textContent = '';
-    if (el.emailVerifyError) el.emailVerifyError.textContent = '';
-  }
+  window.chequettoCredits = { refresh: refreshCredits };
 
-  function requireAuth(nextAction) {
-    if (currentUser) {
-      nextAction?.();
-      return true;
-    }
-    pendingAction = nextAction || null;
-    openModal();
-    return false;
-  }
-
-  window.chequettoAuth = {
-    isAuthenticated: () => !!currentUser,
-    isLoading: () => authLoading,
-    whenReady: () => authReady,
-    openLogin: () => openModal(),
-    requireAuth,
-    openCheckout,
-    refresh: fetchMe,
-    getReferralLink: () => currentUser ? `${window.location.origin}/?convite=${encodeURIComponent(currentUser.referralCode)}` : window.location.origin,
-  };
-
-  async function fetchMe() {
-    const requestVersion = authRequestVersion;
-    try {
-      const authError = new URLSearchParams(window.location.search).get('auth_error');
-      if (authError) {
-        if (el.emailRequestError) el.emailRequestError.textContent = authError || '';
-        openModal();
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
-      const res = await fetch('/api/me');
-      if (requestVersion !== authRequestVersion) return;
-      if (!res.ok) {
-        currentUser = null;
-        renderAccountArea();
-        return;
-      }
-      const data = await res.json();
-      if (requestVersion !== authRequestVersion) return;
-      currentUser = data.user;
-      renderAccountArea();
-      window.dispatchEvent(new CustomEvent('chequetto:authenticated', { detail: { user: currentUser } }));
-    } catch {
-      if (requestVersion !== authRequestVersion) return;
-      currentUser = null;
-      renderAccountArea();
-    } finally {
-      if (authLoading) {
-        authLoading = false;
-        resolveAuthReady();
-      }
-    }
-  }
-
-  el.closeModal?.addEventListener('click', () => {
-    closeModal();
-    if (!currentUser && pendingAction) pendingAction = null;
-  });
+  el.closeModal?.addEventListener('click', closePlans);
   el.modalOverlay?.addEventListener('click', (e) => {
-    if (e.target === el.modalOverlay) {
-      closeModal();
-      if (!currentUser && pendingAction) pendingAction = null;
-    }
+    if (e.target === el.modalOverlay) closePlans();
   });
 
   el.closeCheckoutModal?.addEventListener('click', () => closeCheckout());
@@ -229,24 +126,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const planId = button.dataset.plan || 'mensal';
       selectedPlan = planId;
       const planName = planCatalog[planId]?.name || 'Mensal';
-      const freeText = planId === 'gratis'
-        ? 'Plano Grátis: 20 créditos, ideal para testar e criar até 1 app completo.'
-        : `Plano ${planName} selecionado. ${currentUser ? 'Continue para o pagamento.' : 'Crie sua conta para continuar.'}`;
-      el.planNote.textContent = freeText;
 
       if (planId === 'gratis') {
-        pendingAction = () => openCheckout(planId);
-        openModal();
+        if (el.planNote) el.planNote.textContent = 'Plano Grátis: 20 créditos por IP, ideal para testar e criar seu primeiro app.';
+        closePlans();
         return;
       }
 
-      if (!currentUser) {
-        pendingAction = () => openCheckout(planId);
-        openModal();
-        return;
-      }
-
-      openCheckout(planId);
+      if (el.planNote) el.planNote.textContent = `Plano ${planName}: pagamento temporariamente pausado enquanto reorganizamos o cadastro de contas.`;
     });
   });
 
@@ -257,87 +144,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  el.btnConfirmCheckout?.addEventListener('click', async () => {
-    if (!currentUser) {
-      closeCheckout();
-      openModal();
-      return;
-    }
-
-    el.btnConfirmCheckout.disabled = true;
-    try {
-      const res = await fetch('/api/billing/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ planId: selectedPlan }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Não foi possível iniciar o pagamento.');
-      if (!data.checkoutUrl) throw new Error('O Asaas não retornou o link de pagamento.');
-      closeCheckout();
-      window.location.assign(data.checkoutUrl);
-      if (el.planNote) el.planNote.textContent = 'Checkout Asaas aberto. Seu acesso será liberado após a confirmação do pagamento.';
-    } catch (err) {
-      if (el.planNote) el.planNote.textContent = err.message;
-    } finally {
-      el.btnConfirmCheckout.disabled = false;
-    }
-  });
-
-  el.btnGithubAuth?.addEventListener('click', () => {
-    const params = new URLSearchParams(window.location.search);
-    const referralCode = params.get('convite') || '';
-    window.location.assign(`/api/auth/github?convite=${encodeURIComponent(referralCode)}`);
-  });
-
-  el.formEmailRequest?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    el.emailRequestError.textContent = '';
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const referralCode = params.get('convite') || undefined;
-      if (el.authReferralCode) el.authReferralCode.value = referralCode || '';
-
-      const res = await fetch('/api/auth/email/request-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ email: el.authEmail.value.trim().toLowerCase(), referralCode }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Erro ao enviar código');
-      el.formEmailRequest.hidden = true;
-      el.formEmailVerify.hidden = false;
-      el.authVerificationCode.focus();
-      el.emailVerifyError.textContent = data.message || '';
-    } catch (err) {
-      el.emailRequestError.textContent = err.message;
-    }
-  });
-
-  el.formEmailVerify?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    el.emailVerifyError.textContent = '';
-    try {
-      const res = await fetch('/api/auth/email/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ email: el.authEmail.value.trim().toLowerCase(), code: el.authVerificationCode.value.trim() }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Código inválido');
-      authRequestVersion += 1;
-      await fetchMe();
-      if (!currentUser) throw new Error('A sessão não pôde ser confirmada. Tente novamente.');
-      closeModal();
-      continuePendingAction();
-    } catch (err) {
-      el.emailVerifyError.textContent = err.message;
-    }
+  el.btnConfirmCheckout?.addEventListener('click', () => {
+    if (el.planNote) el.planNote.textContent = 'Pagamento temporariamente pausado enquanto reorganizamos o cadastro de contas.';
+    closeCheckout();
+    openPlans();
   });
 
   renderCheckoutSummary();
   startOfferCountdown();
-  fetchMe();
+  refreshCredits();
 });

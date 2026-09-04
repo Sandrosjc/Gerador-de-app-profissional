@@ -33,6 +33,12 @@
       <button class="workspace-nav__item" type="button" id="btnMeusProjetos"><span>▦</span> Meus projetos</button>
     </div>
     <div class="bench__eyebrow"><span class="eyebrow__dot"></span> Super Platform 2026 <span class="eyebrow__status">online</span></div>
+    <div class="mode-switch" id="modeSwitch" role="tablist" aria-label="Modo de trabalho">
+      <button class="mode-switch__item is-active" type="button" data-mode="construir" role="tab" aria-selected="true">⚡ Construção</button>
+      <button class="mode-switch__item" type="button" data-mode="planejar" role="tab" aria-selected="false">🧭 Planejamento</button>
+    </div>
+    <p class="field__hint" id="modeHint">Modo Construção: cada geração usa 1 crédito. Descreva o app e clique em Gerar.</p>
+    <div class="discussao-log" id="discussaoLog" hidden></div>
     <div>
       <label class="field__label" for="prompt" data-i18n="hero">O que vamos construir hoje?</label>
       <div class="prompt-wrap">
@@ -49,6 +55,9 @@
       <button class="chip" data-tip="Adicione busca, filtros e ordenação">Busca e filtros</button>
       <button class="chip" data-tip="Adicione modo escuro e modo claro">Modo claro/escuro</button>
       <button class="chip" data-tip="Adicione exportação para PDF e Excel">Exportar dados</button>
+    </div>
+    <div class="bench__tips" id="sugestoesChips" hidden>
+      <p class="examples__title">Sugestões da IA pra melhorar seu app</p>
     </div>
     <button class="btn-primary" id="btnGerar">
       <span class="spinner" id="spinner" hidden></span>
@@ -128,33 +137,11 @@
   </main>
 </div>
 
-<!-- ===================== JANELA DE LOGIN / CADASTRO ===================== -->
+<!-- ===================== JANELA DE PLANOS ===================== -->
 <div class="modal-overlay" id="authModalOverlay" hidden>
   <div class="auth-modal" id="authModal">
     <button class="auth-modal__close" id="closeAuthModal">×</button>
     <div class="auth-layout">
-      <section class="auth-panel">
-        <p class="auth-kicker">CHEQUETTO / ACESSO</p>
-        <h2 id="authTitle">Entre para construir.</h2>
-        <p class="auth-lead" id="authLead">Seu trabalho fica salvo e você pode continuar de onde parou. Entre com e-mail ou GitHub.</p>
-
-        <div class="social-login">
-          <button class="social-login__button" id="btnGithubAuth" type="button">Continuar com GitHub</button>
-        </div>
-        <div class="auth-divider"><span>ou</span></div>
-
-        <form id="formEmailRequest">
-          <div class="auth-field"><label for="authEmail">E-mail</label><input type="email" id="authEmail" name="email" autocomplete="email" placeholder="Digite seu e-mail" required></div>
-          <input type="hidden" id="authReferralCode" name="referralCode">
-          <p class="auth-error" id="emailRequestError"></p>
-          <button class="btn-primary auth-submit" type="submit">Continuar com e-mail</button>
-        </form>
-        <form id="formEmailVerify" hidden>
-          <div class="auth-field"><label for="authVerificationCode">Código de verificação</label><input type="text" id="authVerificationCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="Digite o código recebido" required></div>
-          <p class="auth-error" id="emailVerifyError"></p>
-          <button class="btn-primary auth-submit" type="submit">Confirmar código</button>
-        </form>
-      </section>
       <section class="plans-panel">
         <p class="auth-kicker">PLANOS</p>
         <h2>Escolha seu ritmo.</h2>

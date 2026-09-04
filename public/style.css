@@ -1168,3 +1168,19 @@ body{background:#eef1f6;color:#162033;}
 .prompt-wrap .btn-mic{right:8px;font-size:16px;}
 .prompt-wrap .btn-attach:hover,.prompt-wrap .btn-mic:hover{background:#24344d;color:#fff;border-color:#24344d;}
 .prompt-wrap .btn-mic.is-recording{background:#ff6b57;color:#fff;border-color:#ff6b57;}
+
+/* ===================== Modo Planejamento/Construção + chat de discussão ===================== */
+.mode-switch{display:flex;gap:6px;margin:10px 0 4px;background:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:4px;}
+.mode-switch__item{flex:1;border:none;background:transparent;color:var(--text-dim);font:700 12px var(--sans);padding:8px 10px;border-radius:999px;cursor:pointer;transition:background .15s ease,color .15s ease;}
+.mode-switch__item.is-active{background:var(--brass);color:var(--ink);}
+.mode-switch__item:not(.is-active):hover{background:var(--ink-3);color:var(--text);}
+
+.discussao-log{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin:10px 0;padding:4px 2px;}
+.discussao-log:empty{display:none;}
+.discussao-msg{max-width:88%;padding:10px 12px;border-radius:12px;font-size:13px;line-height:1.45;white-space:pre-wrap;}
+.discussao-msg--user{align-self:flex-end;background:var(--brass);color:var(--ink);border-bottom-right-radius:2px;}
+.discussao-msg--ia{align-self:flex-start;background:var(--ink-2);color:var(--text);border:1px solid var(--line);border-bottom-left-radius:2px;}
+.discussao-msg--loading{opacity:.6;font-style:italic;}
+
+.sugestao-chip{background:var(--ink-2);border:1px solid var(--brass-soft);color:var(--brass);}
+.sugestao-chip:hover{background:var(--brass);color:var(--ink);}

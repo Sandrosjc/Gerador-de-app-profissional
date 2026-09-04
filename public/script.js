@@ -31,7 +31,14 @@ document.addEventListener('DOMContentLoaded', () => {
     micHint: document.getElementById('micHint'),
     fileAttach: document.getElementById('fileAttach'),
     attachedFiles: document.getElementById('attachedFiles'),
+    modeSwitch: document.getElementById('modeSwitch'),
+    modeHint: document.getElementById('modeHint'),
+    discussaoLog: document.getElementById('discussaoLog'),
+    sugestoesChips: document.getElementById('sugestoesChips'),
   };
+
+  let modoAtual = 'construir';
+  let discussaoHistorico = [];
 
   let state = {
     codigoAtual: '',
@@ -41,10 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
     historico: [],
     attachedFiles: []
   };
-  let activeUserId = null;
 
   function storageKey(baseKey) {
-    return `${baseKey}:${activeUserId}`;
+    return baseKey;
   }
 
   function clearWorkspace() {
@@ -69,7 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function persistWorkspace() {
     try {
-      if (!activeUserId) return;
       localStorage.setItem(storageKey(WORKSPACE_STORAGE_KEY), JSON.stringify({
         codigoAtual: state.codigoAtual,
         promptAtual: state.promptAtual,
@@ -84,7 +89,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function persistSavedProject(project) {
     try {
-      if (!activeUserId) return;
       const saved = JSON.parse(localStorage.getItem(storageKey(SAVED_PROJECTS_STORAGE_KEY)) || '[]');
       const next = saved.filter((item) => item.id !== project.id);
       next.unshift(project);
@@ -96,7 +100,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function restoreWorkspace() {
     try {
-      if (!activeUserId) return;
       const saved = JSON.parse(localStorage.getItem(storageKey(WORKSPACE_STORAGE_KEY)) || 'null');
       if (!saved) return;
       state = {
@@ -212,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
       renderCarousel();
     }, 4200);
   }
-  carouselCta?.addEventListener('click', () => window.chequettoAuth?.openLogin());
+  carouselCta?.addEventListener('click', () => el.prompt?.focus());
   if (rotatingKeyword) {
     setInterval(() => {
       rotatingKeywordIndex = (rotatingKeywordIndex + 1) % rotatingKeywords.length;
@@ -220,46 +223,102 @@ document.addEventListener('DOMContentLoaded', () => {
     }, 2600);
   }
 
-  let loginPromptGuard = false;
-  let authRequestedForPrompt = false;
+  restoreWorkspace();
 
-  window.addEventListener('chequetto:authenticated', (event) => {
-    activeUserId = event.detail?.user?.id || null;
-    clearWorkspace();
-    restoreWorkspace();
-    authRequestedForPrompt = false;
-    loginPromptGuard = false;
-    el.prompt?.focus();
-  });
+  // ---------- Modo Planejamento / Construção ----------
 
-  window.addEventListener('chequetto:logged-out', () => {
-    activeUserId = null;
-    clearWorkspace();
-  });
-
-  function requireLoadedAuth() {
-    const auth = window.chequettoAuth;
-    if (!auth) return Promise.resolve(false);
-    if (!auth.isLoading?.()) return Promise.resolve(auth.isAuthenticated());
-    return auth.whenReady().then(() => auth.isAuthenticated());
+  function aplicarModo(modo) {
+    modoAtual = modo;
+    el.modeSwitch?.querySelectorAll('[data-mode]').forEach((btn) => {
+      const ativo = btn.dataset.mode === modo;
+      btn.classList.toggle('is-active', ativo);
+      btn.setAttribute('aria-selected', String(ativo));
+    });
+    if (modo === 'planejar') {
+      if (el.discussaoLog) el.discussaoLog.hidden = false;
+      if (el.modeHint) el.modeHint.textContent = 'Modo Planejamento: converse com a IA sobre o app antes de construir. Não gasta crédito.';
+      if (el.btnGerarLabel) el.btnGerarLabel.textContent = 'Perguntar';
+    } else {
+      if (el.discussaoLog) el.discussaoLog.hidden = true;
+      if (el.modeHint) el.modeHint.textContent = 'Modo Construção: cada geração usa 1 crédito. Descreva o app e clique em Gerar.';
+      if (el.btnGerarLabel) el.btnGerarLabel.textContent = 'Gerar App';
+    }
   }
 
-  el.prompt?.addEventListener('focus', () => {
-    if (!loginPromptGuard && window.chequettoAuth?.isLoading?.()) {
-      el.prompt.blur();
-      return;
-    }
-    if (!window.chequettoAuth?.isAuthenticated() && !loginPromptGuard) {
-      if (authRequestedForPrompt) return;
-      authRequestedForPrompt = true;
-      loginPromptGuard = true;
-      window.chequettoAuth?.openLogin();
-      el.prompt?.blur();
-      setTimeout(() => {
-        loginPromptGuard = false;
-      }, 500);
-    }
+  el.modeSwitch?.querySelectorAll('[data-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => aplicarModo(btn.dataset.mode));
   });
+
+  function addDiscussaoMsg(texto, autor, { loading = false } = {}) {
+    if (!el.discussaoLog) return null;
+    const bubble = document.createElement('div');
+    bubble.className = `discussao-msg discussao-msg--${autor === 'user' ? 'user' : 'ia'}${loading ? ' discussao-msg--loading' : ''}`;
+    bubble.textContent = texto;
+    el.discussaoLog.appendChild(bubble);
+    el.discussaoLog.scrollTop = el.discussaoLog.scrollHeight;
+    return bubble;
+  }
+
+  async function enviarDiscussao() {
+    const mensagem = el.prompt ? el.prompt.value.trim() : '';
+    if (!mensagem) return;
+    if (el.prompt) el.prompt.value = '';
+    addDiscussaoMsg(mensagem, 'user');
+    discussaoHistorico.push({ autor: 'user', texto: mensagem });
+    const bubbleCarregando = addDiscussaoMsg('Pensando...', 'ia', { loading: true });
+
+    try {
+      const res = await fetch('/api/chat/discutir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mensagem, historico: discussaoHistorico.slice(-10) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erro ao conversar com a IA');
+      bubbleCarregando?.remove();
+      addDiscussaoMsg(data.resposta, 'ia');
+      discussaoHistorico.push({ autor: 'ia', texto: data.resposta });
+    } catch (error) {
+      bubbleCarregando?.remove();
+      addDiscussaoMsg('Erro: ' + error.message, 'ia');
+    }
+  }
+
+  // ---------- Sugestões automáticas da IA (chips clicáveis) ----------
+
+  async function buscarSugestoes(files) {
+    if (!el.sugestoesChips || !files || !files.length) return;
+    try {
+      const res = await fetch('/api/sugestoes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ files }),
+      });
+      const data = await res.json();
+      const sugestoes = Array.isArray(data.sugestoes) ? data.sugestoes : [];
+      el.sugestoesChips.querySelectorAll('.sugestao-chip').forEach((chip) => chip.remove());
+      if (!sugestoes.length) {
+        el.sugestoesChips.hidden = true;
+        return;
+      }
+      sugestoes.forEach((sugestao) => {
+        const chip = document.createElement('button');
+        chip.className = 'chip sugestao-chip';
+        chip.type = 'button';
+        chip.textContent = sugestao;
+        chip.addEventListener('click', () => {
+          if (el.refineInput) {
+            el.refineInput.value = sugestao;
+            el.btnRefinar?.click();
+          }
+        });
+        el.sugestoesChips.appendChild(chip);
+      });
+      el.sugestoesChips.hidden = false;
+    } catch {
+      el.sugestoesChips.hidden = true;
+    }
+  }
 
   el.prompt?.addEventListener('input', () => {
     state.promptDraft = el.prompt.value;
@@ -285,11 +344,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   document.getElementById('aiTips')?.addEventListener('click', (event) => {
-    if (window.chequettoAuth?.isLoading?.()) return;
-    if (!window.chequettoAuth?.isAuthenticated()) {
-      window.chequettoAuth?.openLogin();
-      return;
-    }
     const tip = event.target.closest('[data-tip]')?.getAttribute('data-tip');
     if (!tip || !el.prompt) return;
     el.prompt.value = el.prompt.value.trim()
@@ -299,11 +353,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   el.fileAttach?.addEventListener('change', () => {
-    if (!window.chequettoAuth?.isAuthenticated()) {
-      window.chequettoAuth?.openLogin();
-      el.fileAttach.value = '';
-      return;
-    }
     addAttachedFiles(el.fileAttach.files);
     el.fileAttach.value = '';
   });
@@ -361,10 +410,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (el.btnMic) {
       el.btnMic.addEventListener('click', () => {
-        if (!window.chequettoAuth?.isAuthenticated()) {
-          window.chequettoAuth?.openLogin();
-          return;
-        }
         if (gravando) {
           recognition.stop();
           return;
@@ -418,18 +463,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (el.btnGerar) {
     el.btnGerar.addEventListener('click', async () => {
-      if (!(await requireLoadedAuth())) {
-        authRequestedForPrompt = true;
-        window.chequettoAuth?.openLogin();
-        if (el.status) el.status.textContent = 'Entre ou crie sua conta para gerar o aplicativo.';
+      if (modoAtual === 'planejar') {
+        enviarDiscussao();
         return;
       }
-      if (!window.chequettoAuth?.isAuthenticated()) {
-        authRequestedForPrompt = true;
-        window.chequettoAuth?.openLogin();
-        if (el.status) el.status.textContent = 'Entre ou crie sua conta para gerar o aplicativo.';
-        return;
-      }
+
       const basePrompt = el.prompt ? el.prompt.value.trim() : '';
       if (!basePrompt && !state.attachedFiles.length) {
         alert('Por favor, descreva o aplicativo que você quer criar.');
@@ -475,10 +513,8 @@ document.addEventListener('DOMContentLoaded', () => {
           state.historico.push({ prompt: promptText, code: data.html, plano: state.planoAtual });
           renderHistory();
           persistWorkspace();
-
-          if (window.chequettoAuth?.refresh) {
-            window.chequettoAuth.refresh();
-          }
+          window.chequettoCredits?.refresh?.();
+          buscarSugestoes(data.files);
 
           if (el.status) el.status.textContent = 'Aplicativo gerado com sucesso!';
           setLoading(false);
@@ -589,6 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.historico.push({ prompt: 'Ajuste: ' + pedido, code: data.code, plano: state.planoAtual });
       renderHistory();
       persistWorkspace();
+      buscarSugestoes(data.files);
       if (el.refineInput) el.refineInput.value = '';
       if (el.status) el.status.textContent = 'Alteração aplicada com sucesso!';
     } catch (error) {
@@ -654,9 +691,6 @@ document.addEventListener('DOMContentLoaded', () => {
         el.btnSalvar.textContent = 'Salvo ✓';
         setTimeout(() => { el.btnSalvar.textContent = original; el.btnSalvar.disabled = false; }, 1800);
       } catch (error) {
-        if (error.message === 'Não autenticado') {
-          window.chequettoAuth?.openLogin();
-        }
         el.btnSalvar.textContent = 'Erro ao salvar';
         setTimeout(() => { el.btnSalvar.textContent = original; el.btnSalvar.disabled = false; }, 1800);
       }
@@ -665,7 +699,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const btnShareWhatsapp = document.getElementById('btnShareWhatsapp');
   btnShareWhatsapp?.addEventListener('click', () => {
-    const link = window.chequettoAuth?.getReferralLink?.() || window.location.origin;
+    const link = window.location.origin;
     const text = encodeURIComponent(`Crie seu aplicativo grátis no Chequetto: ${link}`);
     const url = `https://wa.me/?text=${text}`;
     window.open(url, '_blank', 'noopener,noreferrer');

@@ -269,4 +269,58 @@ ${listaAtual}`;
   throw new Error('Não foi possível aplicar o refinamento. Último erro: ' + (ultimoErro?.message || 'desconhecido'));
 }
 
-module.exports = { gerarComGemini, refinarComGemini, getApiKeys };
+const INSTRUCAO_DISCUSSAO = `Você é um consultor técnico e de produto do Oficina, uma plataforma que gera mini-aplicativos web com IA.
+Aqui você está no MODO PLANEJAMENTO: converse com a pessoa, tire dúvidas, sugira arquitetura de telas/banco de dados, discuta ideias.
+NÃO gere código nenhum e NÃO produza um app aqui — isso só acontece no Modo Construção, separadamente.
+Seja direto, útil e breve (poucos parágrafos curtos, sem enrolação). Responda em português.`;
+
+const INSTRUCAO_SUGESTOES = `Você é o consultor do Oficina. Olhando o código de um app React que acabou de ser gerado, sugira 3 melhorias profissionais de alto nível que a pessoa poderia pedir em seguida.
+Responda com exatamente 3 linhas, cada uma começando com "-", curtas (até 8 palavras), no imperativo (ex: "Adicionar validação de formulário", "Criar modo escuro", "Adicionar filtro de busca").
+Nada além das 3 linhas — sem introdução, sem explicação.`;
+
+// Modo Planejamento: só conversa, não gera nem altera código, não consome crédito.
+async function discutirComGemini(mensagem, historico = []) {
+  const keys = getApiKeys();
+  if (keys.length === 0) throw new Error('Nenhuma chave de API configurada.');
+
+  const contexto = historico
+    .slice(-10)
+    .map((item) => `${item.autor === 'user' ? 'Usuário' : 'Você'}: ${item.texto}`)
+    .join('\n');
+
+  const promptFinal = `${INSTRUCAO_DISCUSSAO}\n\n${contexto ? `Conversa até agora:\n${contexto}\n\n` : ''}Usuário: ${mensagem}`;
+
+  let ultimoErro = null;
+  for (const key of keys) {
+    try {
+      return (await chamarGemini(key, promptFinal)).trim();
+    } catch (err) {
+      ultimoErro = err;
+      console.warn('Erro na discussão com uma das chaves, tentando a próxima...', err.message);
+    }
+  }
+  throw new Error('Não foi possível responder agora. Último erro: ' + (ultimoErro?.message || 'desconhecido'));
+}
+
+// Depois de gerar/refinar: sugere 3 melhorias de alto nível, exibidas como chips clicáveis.
+async function sugerirMelhorias(files) {
+  const keys = getApiKeys();
+  if (keys.length === 0) return [];
+
+  const resumoArquivos = (files || [])
+    .map((arquivo) => `// ${arquivo.path}\n${arquivo.content.slice(0, 600)}`)
+    .join('\n\n');
+
+  for (const key of keys) {
+    try {
+      const texto = await chamarGemini(key, `${INSTRUCAO_SUGESTOES}\n\nCódigo do app:\n${resumoArquivos}`);
+      const sugestoes = extrairLista(texto);
+      return sugestoes.slice(0, 3);
+    } catch (err) {
+      console.warn('Erro ao gerar sugestões com uma das chaves, tentando a próxima...', err.message);
+    }
+  }
+  return [];
+}
+
+module.exports = { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, getApiKeys };

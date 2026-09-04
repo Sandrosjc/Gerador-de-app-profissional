@@ -38,6 +38,12 @@ CREATE TABLE IF NOT EXISTS invites (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS anon_credits (
+  ip TEXT PRIMARY KEY,
+  credits INTEGER NOT NULL DEFAULT 20,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ip_signups (
   ip TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -269,6 +275,24 @@ function createPendingSubscription({ userId, planId, amount, currency, gateway, 
   return db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id);
 }
 
+// ---------- Créditos anônimos por IP (sem precisar de conta) ----------
+
+const ANON_CREDITOS_INICIAIS = 20;
+
+function getAnonCredits(ip) {
+  const existente = db.prepare('SELECT * FROM anon_credits WHERE ip = ?').get(ip);
+  if (existente) return existente;
+  db.prepare('INSERT INTO anon_credits (ip, credits) VALUES (?, ?)').run(ip, ANON_CREDITOS_INICIAIS);
+  return db.prepare('SELECT * FROM anon_credits WHERE ip = ?').get(ip);
+}
+
+function deductAnonCredit(ip) {
+  const atual = getAnonCredits(ip);
+  if (atual.credits <= 0) throw new Error('SEM_CREDITOS');
+  db.prepare('UPDATE anon_credits SET credits = credits - 1 WHERE ip = ?').run(ip);
+  return getAnonCredits(ip);
+}
+
 module.exports = {
   CREDIT_RULES,
   createUser,
@@ -290,4 +314,6 @@ module.exports = {
   getProjectById,
   listProjectsByUser,
   createPendingSubscription,
+  getAnonCredits,
+  deductAnonCredit,
 };

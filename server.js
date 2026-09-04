@@ -8,7 +8,7 @@ const XLSX = require('xlsx');
 const dotenv = require('dotenv');
 dotenv.config();
 const cookieParser = require('cookie-parser');
-const { gerarComGemini, refinarComGemini, getApiKeys } = require('./gemini-manager');
+const { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, getApiKeys } = require('./gemini-manager');
 const {
   createUser,
   getUserByEmail,
@@ -28,6 +28,8 @@ const {
   incrementAuthVerificationAttempts,
   deleteAuthVerification,
   markEmailVerified,
+  getAnonCredits,
+  deductAnonCredit,
 } = require('./db');
 const { signUserToken, requireAuth } = require('./auth');
 const plans = require('./plans.json');
@@ -97,6 +99,11 @@ function tryGetUser(req) {
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', keysLoaded: keys.length });
+});
+
+app.get('/api/credits', (req, res) => {
+  const anon = getAnonCredits(clientIp(req));
+  res.json({ credits: anon.credits });
 });
 
 app.get('/api/plans', (req, res) => {
@@ -421,17 +428,17 @@ app.post('/api/billing/asaas/webhook', (req, res) => {
 
 // ---------- Geração com etapas em tempo real (Server-Sent Events) ----------
 
-app.get('/generate/stream', requireAuth, async (req, res) => {
+app.get('/generate/stream', async (req, res) => {
   const prompt = req.query.prompt;
   if (!prompt) {
     res.status(400).json({ error: 'Prompt não fornecido' });
     return;
   }
 
-  const user = getUserById(req.userId);
-  const freeLimitReached = !!user && !user.unlimited_credits && user.credits <= 0;
-  if (freeLimitReached) {
-    res.status(402).json({ error: 'Limite de créditos do plano grátis atingido. Convide um amigo para ganhar mais 20 créditos.' });
+  const ip = clientIp(req);
+  const anon = getAnonCredits(ip);
+  if (anon.credits <= 0) {
+    res.status(402).json({ error: 'Seus 20 créditos grátis acabaram por enquanto.' });
     return;
   }
 
@@ -443,10 +450,7 @@ app.get('/generate/stream', requireAuth, async (req, res) => {
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
   try {
-    if (user && !user.unlimited_credits) {
-      const updatedUser = require('./db').deductCredit(user.id);
-      if (!updatedUser) throw new Error('Não foi possível atualizar os créditos.');
-    }
+    deductAnonCredit(ip);
 
     const { html, files, plano } = await gerarComGemini(prompt, [], (step) => send(step), req.query.lang);
     send({ stage: 'salvo_temp', html, files, plano });
@@ -459,21 +463,19 @@ app.get('/generate/stream', requireAuth, async (req, res) => {
 });
 
 // mantém a rota antiga funcionando também, sem streaming, pra compatibilidade
-app.post('/generate', requireAuth, async (req, res) => {
+app.post('/generate', async (req, res) => {
   try {
     const { prompt } = req.body;
     if (!prompt) {
       return res.status(400).json({ error: 'Prompt não fornecido' });
     }
 
-    const user = getUserById(req.userId);
-    if (user && !user.unlimited_credits && user.credits <= 0) {
-      return res.status(402).json({ error: 'Limite de créditos do plano grátis atingido. Convide um amigo para ganhar mais 20 créditos.' });
+    const ip = clientIp(req);
+    const anon = getAnonCredits(ip);
+    if (anon.credits <= 0) {
+      return res.status(402).json({ error: 'Seus 20 créditos grátis acabaram por enquanto.' });
     }
-
-    if (user && !user.unlimited_credits) {
-      require('./db').deductCredit(user.id);
-    }
+    deductAnonCredit(ip);
 
     const { html, files, plano } = await gerarComGemini(prompt, [], () => {});
     res.json({ code: html, files, plano });
@@ -483,7 +485,7 @@ app.post('/generate', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/refine', requireAuth, async (req, res) => {
+app.post('/refine', async (req, res) => {
   const { html, pedido } = req.body || {};
   if (!html || !pedido) return res.status(400).json({ error: 'Aplicativo e pedido de alteração são obrigatórios' });
   try {
@@ -495,23 +497,48 @@ app.post('/refine', requireAuth, async (req, res) => {
   }
 });
 
-// ---------- Salvar app gerado na plataforma ----------
+// ---------- Modo Planejamento: conversa livre, não consome crédito, não gera código ----------
 
-app.post('/api/projects/save', requireAuth, (req, res) => {
+app.post('/api/chat/discutir', async (req, res) => {
+  const { mensagem, historico } = req.body || {};
+  if (!mensagem) return res.status(400).json({ error: 'Mensagem vazia' });
+  try {
+    const resposta = await discutirComGemini(mensagem, Array.isArray(historico) ? historico : []);
+    res.json({ resposta });
+  } catch (error) {
+    console.error('Erro na discussão:', error);
+    res.status(500).json({ error: error.message || 'Erro ao conversar com a IA' });
+  }
+});
+
+// ---------- Sugestões automáticas da IA após gerar/refinar (gratuitas) ----------
+
+app.post('/api/sugestoes', async (req, res) => {
+  const { files } = req.body || {};
+  try {
+    const sugestoes = await sugerirMelhorias(Array.isArray(files) ? files : []);
+    res.json({ sugestoes });
+  } catch (error) {
+    console.error('Erro ao gerar sugestões:', error);
+    res.json({ sugestoes: [] });
+  }
+});
+
+// ---------- Salvar app gerado na plataforma ----------
+// Sem sistema de login: o histórico "salvo" fica associado ao navegador
+// (localStorage, no script.js) — aqui só persistimos o registro em si.
+
+app.post('/api/projects/save', (req, res) => {
   const { prompt, plano, html, files, nome } = req.body || {};
   if (!html || !prompt) return res.status(400).json({ error: 'Dados incompletos para salvar' });
 
-  const project = saveProject({ userId: req.userId, prompt, plano, html, files, nome });
+  const project = saveProject({ userId: null, prompt, plano, html, files, nome });
   res.json({ project: { id: project.id, nome: project.nome, created_at: project.created_at } });
 });
 
-app.get('/api/projects', requireAuth, (req, res) => {
-  res.json({ projects: listProjectsByUser(req.userId) });
-});
-
-app.get('/api/projects/:id', requireAuth, (req, res) => {
+app.get('/api/projects/:id', (req, res) => {
   const project = getProjectById(req.params.id);
-  if (!project || project.user_id !== req.userId) return res.status(404).json({ error: 'Não encontrado' });
+  if (!project) return res.status(404).json({ error: 'Não encontrado' });
   project.plano = JSON.parse(project.plano || '[]');
   res.json({ project });
 });
@@ -519,5 +546,5 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
   console.log(`   Chaves carregadas: ${keys.length}`);
-  console.log(`Servidor rodando com sucesso!`);
+  console.log(`Servidor rodando com sucesso! (sem exigência de login — créditos por IP)`);
 });
