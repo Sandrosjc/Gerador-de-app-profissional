@@ -1,4 +1,4 @@
-// conta.js — créditos por IP (sem login) + vitrine de planos.
+// conta.js — créditos por IP + sistema de autenticação por código de e-mail
 // O checkout de pagamento (Asaas) dependia de contas de usuário; como o
 // login foi removido, ele fica pausado por enquanto (ver aviso no clique
 // de um plano pago) até decidirmos como identificar quem pagou sem conta.
@@ -16,6 +16,19 @@ document.addEventListener('DOMContentLoaded', () => {
     checkoutPlanFrequency: document.getElementById('checkoutPlanFrequency'),
     closeCheckoutModal: document.getElementById('closeCheckoutModal'),
     btnConfirmCheckout: document.getElementById('btnConfirmCheckout'),
+    authEmail: document.getElementById('authEmail'),
+    authCode: document.getElementById('authCode'),
+    authError: document.getElementById('authError'),
+    authSuccess: document.getElementById('authSuccess'),
+    authSendCode: document.getElementById('authSendCode'),
+    authVerifyCode: document.getElementById('authVerifyCode'),
+    authCodeStep: document.getElementById('authCodeStep'),
+    authEmailStep: document.getElementById('authEmailStep'),
+    authResendCode: document.getElementById('authResendCode'),
+    authCountdown: document.getElementById('authCountdown'),
+    authReferral: document.getElementById('authReferral'),
+    authLoginGoogle: document.getElementById('authLoginGoogle'),
+    authBackEmail: document.getElementById('authBackEmail'),
   };
 
   const planCatalog = {
@@ -29,6 +42,163 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentCredits = null;
   let selectedPlan = 'mensal';
+  let countdownTimer = null;
+  let user = null;
+
+  // ==================== AUTH ====================
+
+  function setAuthError(msg) {
+    if (el.authError) {
+      el.authError.textContent = msg;
+      el.authError.hidden = !msg;
+    }
+  }
+
+  function setAuthSuccess(msg) {
+    if (el.authSuccess) {
+      el.authSuccess.textContent = msg;
+      el.authSuccess.hidden = !msg;
+    }
+  }
+
+  function startCountdown(seconds) {
+    if (el.authCountdown) {
+      el.authCountdown.textContent = seconds;
+      el.authCountdown.hidden = false;
+    }
+    if (el.authResendCode) el.authResendCode.disabled = true;
+
+    if (countdownTimer) clearInterval(countdownTimer);
+    let remaining = seconds;
+    countdownTimer = setInterval(() => {
+      remaining--;
+      if (el.authCountdown) el.authCountdown.textContent = remaining;
+      if (remaining <= 0) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+        if (el.authCountdown) el.authCountdown.hidden = true;
+        if (el.authResendCode) el.authResendCode.disabled = false;
+      }
+    }, 1000);
+  }
+
+  async function requestVerificationCode(email, referralCode = '') {
+    setAuthError('');
+    setAuthSuccess('');
+
+    try {
+      const response = await fetch('/api/auth/email/request-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, referralCode }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Erro ao enviar código.');
+      
+      setAuthSuccess(data.message || 'Código enviado para seu e-mail.');
+      if (el.authEmailStep) el.authEmailStep.hidden = true;
+      if (el.authCodeStep) el.authCodeStep.hidden = false;
+      if (el.authEmail) {
+        const display = document.getElementById('authEmailDisplay');
+        if (display) display.textContent = email;
+      }
+      startCountdown(60);
+      return true;
+    } catch (error) {
+      setAuthError(error.message);
+      return false;
+    }
+  }
+
+  async function verifyCode(code) {
+    setAuthError('');
+    setAuthSuccess('');
+
+    try {
+      const email = el.authEmail ? el.authEmail.value : '';
+      const response = await fetch('/api/auth/email/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Código inválido.');
+      
+      user = data.user;
+      setAuthSuccess('Login realizado com sucesso!');
+      renderAccountArea();
+      closeAuthModal();
+      return true;
+    } catch (error) {
+      setAuthError(error.message);
+      return false;
+    }
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {}
+    user = null;
+    renderAccountArea();
+  }
+
+  function renderAccountArea() {
+    if (!el.accountArea) return;
+
+    if (user) {
+      const name = user.name || user.email.split('@')[0];
+      const credits = user.credits || 0;
+      const isUnlimited = user.unlimited || false;
+
+      el.accountArea.innerHTML = `
+        <div class="account-chip account-chip--user">
+          <span class="account-chip__credits" title="Créditos disponíveis">
+            ${isUnlimited ? '∞' : credits}
+          </span>
+          <span class="account-chip__name">${name}</span>
+          <button class="btn-secondary btn-secondary--small" id="btnLogout">Sair</button>
+          <button class="btn-secondary btn-secondary--small" id="btnVerPlanos">Planos</button>
+        </div>
+      `;
+      document.getElementById('btnLogout')?.addEventListener('click', logout);
+      document.getElementById('btnVerPlanos')?.addEventListener('click', openPlans);
+    } else {
+      el.accountArea.innerHTML = `
+        <div class="account-chip account-chip--guest">
+          <span class="account-chip__credits" title="Créditos grátis restantes">⚡ ${currentCredits ?? '...'}</span>
+          <button class="btn-secondary btn-secondary--small" id="btnLogin">Entrar</button>
+          <button class="btn-secondary btn-secondary--small" id="btnVerPlanos">Planos</button>
+        </div>
+      `;
+      document.getElementById('btnLogin')?.addEventListener('click', openAuthModal);
+      document.getElementById('btnVerPlanos')?.addEventListener('click', openPlans);
+    }
+  }
+
+  function openAuthModal() {
+    if (!el.modalOverlay) return;
+    if (el.authEmailStep) el.authEmailStep.hidden = false;
+    if (el.authCodeStep) el.authCodeStep.hidden = true;
+    if (el.authEmail) el.authEmail.value = '';
+    if (el.authCode) el.authCode.value = '';
+    if (el.authReferral) el.authReferral.value = '';
+    setAuthError('');
+    setAuthSuccess('');
+    if (el.authCountdown) el.authCountdown.hidden = true;
+    if (el.authResendCode) el.authResendCode.disabled = true;
+    el.modalOverlay.hidden = false;
+  }
+
+  function closeAuthModal() {
+    if (el.modalOverlay) el.modalOverlay.hidden = true;
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+  }
+
+  // ==================== PLANOS ====================
 
   function startOfferCountdown() {
     const countdown = document.getElementById('offerCountdown');
@@ -64,18 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderAccountArea() {
-    if (!el.accountArea) return;
-    const creditsLabel = currentCredits ?? '...';
-    el.accountArea.innerHTML = `
-      <div class="account-chip account-chip--guest">
-        <span class="account-chip__credits" title="Créditos grátis restantes">⚡ ${creditsLabel}</span>
-        <button class="btn-secondary btn-secondary--small" id="btnVerPlanos">Planos</button>
-      </div>
-    `;
-    document.getElementById('btnVerPlanos')?.addEventListener('click', openPlans);
-  }
-
   async function refreshCredits() {
     try {
       const res = await fetch('/api/credits');
@@ -84,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentCredits = data.credits;
       renderAccountArea();
     } catch {
-      // silencioso — não é crítico pra experiência
+      // silencioso
     }
   }
 
@@ -107,18 +265,80 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.checkoutModalOverlay) el.checkoutModalOverlay.hidden = true;
   }
 
-  window.chequettoCredits = { refresh: refreshCredits };
+  // ==================== EVENTOS ====================
 
-  el.closeModal?.addEventListener('click', closePlans);
-  el.modalOverlay?.addEventListener('click', (e) => {
-    if (e.target === el.modalOverlay) closePlans();
+  // Enviar código
+  el.authSendCode?.addEventListener('click', async () => {
+    const email = el.authEmail?.value?.trim();
+    const referral = el.authReferral?.value?.trim() || '';
+    if (!email) {
+      setAuthError('Informe seu e-mail.');
+      return;
+    }
+    await requestVerificationCode(email, referral);
   });
 
-  el.closeCheckoutModal?.addEventListener('click', () => closeCheckout());
+  // Verificar código
+  el.authVerifyCode?.addEventListener('click', async () => {
+    const code = el.authCode?.value?.trim();
+    if (!code || code.length !== 6) {
+      setAuthError('Insira o código de 6 dígitos.');
+      return;
+    }
+    await verifyCode(code);
+  });
+
+  // Reenviar código
+  el.authResendCode?.addEventListener('click', async () => {
+    const email = el.authEmail?.value?.trim();
+    if (!email) {
+      setAuthError('Informe seu e-mail.');
+      return;
+    }
+    await requestVerificationCode(email, el.authReferral?.value?.trim() || '');
+  });
+
+  // Voltar para email
+  el.authBackEmail?.addEventListener('click', () => {
+    if (el.authEmailStep) el.authEmailStep.hidden = false;
+    if (el.authCodeStep) el.authCodeStep.hidden = true;
+    if (el.authCode) el.authCode.value = '';
+    setAuthError('');
+    setAuthSuccess('');
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    if (el.authCountdown) el.authCountdown.hidden = true;
+    if (el.authResendCode) el.authResendCode.disabled = true;
+  });
+
+  // Enter para enviar código
+  el.authEmail?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el.authSendCode?.click();
+  });
+
+  el.authCode?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el.authVerifyCode?.click();
+  });
+
+  // Login com Google/GitHub
+  el.authLoginGoogle?.addEventListener('click', () => {
+    window.location.href = '/api/auth/github';
+  });
+
+  // Fechar modal
+  el.closeModal?.addEventListener('click', closeAuthModal);
+  el.modalOverlay?.addEventListener('click', (e) => {
+    if (e.target === el.modalOverlay) closeAuthModal();
+  });
+
+  el.closeCheckoutModal?.addEventListener('click', closeCheckout);
   el.checkoutModalOverlay?.addEventListener('click', (e) => {
     if (e.target === el.checkoutModalOverlay) closeCheckout();
   });
 
+  // Selecionar plano
   document.querySelectorAll('[data-plan]').forEach((button) => {
     button.addEventListener('click', () => {
       document.querySelectorAll('[data-plan]').forEach((plan) => plan.classList.remove('is-selected'));
@@ -150,7 +370,25 @@ document.addEventListener('DOMContentLoaded', () => {
     openPlans();
   });
 
+  // ==================== INIT ====================
+
+  window.chequettoCredits = { refresh: refreshCredits };
+
   renderCheckoutSummary();
   startOfferCountdown();
   refreshCredits();
+
+  // Verificar se já está logado
+  (async () => {
+    try {
+      const res = await fetch('/api/me');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          user = data.user;
+          renderAccountArea();
+        }
+      }
+    } catch {}
+  })();
 });

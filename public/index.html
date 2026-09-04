@@ -137,11 +137,52 @@
   </main>
 </div>
 
-<!-- ===================== JANELA DE PLANOS ===================== -->
+<!-- ===================== JANELA DE AUTENTICAÇÃO ===================== -->
 <div class="modal-overlay" id="authModalOverlay" hidden>
   <div class="auth-modal" id="authModal">
     <button class="auth-modal__close" id="closeAuthModal">×</button>
     <div class="auth-layout">
+      <section class="auth-panel">
+        <p class="auth-kicker">CHEQUETTO</p>
+        <h2>Entre com seu e-mail</h2>
+        <p class="auth-lead">Receba um código de verificação de 6 dígitos no seu e-mail.</p>
+
+        <!-- STEP 1: Email -->
+        <div id="authEmailStep">
+          <div class="auth-field">
+            <label for="authEmail">Endereço de e-mail</label>
+            <input type="email" id="authEmail" placeholder="seu.email@exemplo.com" autocomplete="email">
+          </div>
+          <div class="auth-field">
+            <label for="authReferral">Código de indicação (opcional)</label>
+            <input type="text" id="authReferral" placeholder="Digite o código de quem te convidou">
+          </div>
+          <div id="authError" class="auth-error" hidden></div>
+          <div id="authSuccess" class="auth-success" hidden></div>
+          <button class="btn-primary auth-submit" id="authSendCode">Enviar código</button>
+          <div class="auth-divider">ou</div>
+          <button class="btn-secondary auth-submit" id="authLoginGoogle">Entrar com Google</button>
+        </div>
+
+        <!-- STEP 2: Código -->
+        <div id="authCodeStep" hidden>
+          <p class="auth-lead">Insira o código de 6 dígitos enviado para <strong id="authEmailDisplay"></strong></p>
+          <div class="auth-field">
+            <label for="authCode">Código de verificação</label>
+            <input type="text" id="authCode" placeholder="000000" maxlength="6" autocomplete="one-time-code">
+          </div>
+          <div id="authError2" class="auth-error" hidden></div>
+          <div id="authSuccess2" class="auth-success" hidden></div>
+          <button class="btn-primary auth-submit" id="authVerifyCode">Verificar e Entrar</button>
+          <div style="display:flex; justify-content:space-between; margin-top:8px;">
+            <button class="btn-ghost btn-ghost--small" id="authResendCode" disabled>Reenviar código <span id="authCountdown" hidden>60</span></button>
+            <button class="btn-ghost btn-ghost--small" id="authBackEmail">← Voltar</button>
+          </div>
+        </div>
+
+        <p class="auth-note">Você receberá um código por e-mail. Sem senhas, mais seguro.</p>
+      </section>
+
       <section class="plans-panel">
         <p class="auth-kicker">PLANOS</p>
         <h2>Escolha seu ritmo.</h2>
@@ -180,6 +221,7 @@
   </div>
 </div>
 
+<!-- ===================== CHECKOUT ===================== -->
 <div class="checkout-overlay" id="checkoutModalOverlay" hidden>
   <div class="checkout-sheet" id="checkoutModal">
     <button class="auth-modal__close" id="closeCheckoutModal">×</button>
