@@ -225,8 +225,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   restoreWorkspace();
 
-  // ---------- Modo Planejamento / Construção ----------
-
   function aplicarModo(modo) {
     modoAtual = modo;
     el.modeSwitch?.querySelectorAll('[data-mode]').forEach((btn) => {
@@ -283,8 +281,6 @@ document.addEventListener('DOMContentLoaded', () => {
       addDiscussaoMsg('Erro: ' + error.message, 'ia');
     }
   }
-
-  // ---------- Sugestões automáticas da IA (chips clicáveis) ----------
 
   async function buscarSugestoes(files) {
     if (!el.sugestoesChips || !files || !files.length) return;
@@ -372,7 +368,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ===================== MICROFONE (falar em vez de digitar) =====================
   (function setupMic() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
