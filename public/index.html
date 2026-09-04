@@ -85,6 +85,7 @@
     </div>
     <div class="bench__footer">Oficina v1.0</div>
   </aside>
+
   <!-- ===================== PALCO / PREVIEW ===================== -->
   <main class="stage">
     <div class="stage__bar">
@@ -144,57 +145,43 @@
     <div class="auth-layout">
       <section class="auth-panel">
         <p class="auth-kicker">CHEQUETTO</p>
-        <h2>Entre na sua conta</h2>
-        <p class="auth-lead">Acesse sua conta ou crie uma nova em segundos.</p>
+        <h2>Entre com seu e-mail</h2>
+        <p class="auth-lead">Receba um código de verificação de 6 dígitos no seu e-mail.</p>
 
-        <!-- Tabs: Login / Cadastro -->
-        <div class="auth-tabs">
-          <button class="auth-tab is-active" data-tab="login">Entrar</button>
-          <button class="auth-tab" data-tab="signup">Criar Conta</button>
-        </div>
-
-        <!-- FORM LOGIN -->
-        <div id="authLoginForm">
+        <!-- STEP 1: Email -->
+        <div id="authEmailStep">
           <div class="auth-field">
             <label for="authEmail">Endereço de e-mail</label>
             <input type="email" id="authEmail" placeholder="seu.email@exemplo.com" autocomplete="email">
           </div>
           <div class="auth-field">
-            <label for="authPassword">Senha</label>
-            <input type="password" id="authPassword" placeholder="••••••••" autocomplete="current-password">
+            <label for="authReferral">Código de indicação (opcional)</label>
+            <input type="text" id="authReferral" placeholder="Digite o código de quem te convidou">
           </div>
           <div id="authError" class="auth-error" hidden></div>
           <div id="authSuccess" class="auth-success" hidden></div>
-          <button class="btn-primary auth-submit" id="authLoginBtn" type="button">Entrar na Conta</button>
+          <button class="btn-primary auth-submit" id="authSendCode">Enviar código</button>
+          <div class="auth-divider">ou</div>
+          <button class="btn-secondary auth-submit" id="authLoginGoogle">Entrar com Google</button>
         </div>
 
-        <!-- FORM CADASTRO -->
-        <div id="authSignupForm" hidden>
+        <!-- STEP 2: Código -->
+        <div id="authCodeStep" hidden>
+          <p class="auth-lead">Insira o código de 6 dígitos enviado para <strong id="authEmailDisplay"></strong></p>
           <div class="auth-field">
-            <label for="authSignupName">Nome completo</label>
-            <input type="text" id="authSignupName" placeholder="Seu nome" autocomplete="name">
+            <label for="authCode">Código de verificação</label>
+            <input type="text" id="authCode" placeholder="000000" maxlength="6" autocomplete="one-time-code">
           </div>
-          <div class="auth-field">
-            <label for="authSignupEmail">Endereço de e-mail</label>
-            <input type="email" id="authSignupEmail" placeholder="seu.email@exemplo.com" autocomplete="email">
+          <div id="authError2" class="auth-error" hidden></div>
+          <div id="authSuccess2" class="auth-success" hidden></div>
+          <button class="btn-primary auth-submit" id="authVerifyCode">Verificar e Entrar</button>
+          <div style="display:flex; justify-content:space-between; margin-top:8px;">
+            <button class="btn-ghost btn-ghost--small" id="authResendCode" disabled>Reenviar código <span id="authCountdown" hidden>60</span></button>
+            <button class="btn-ghost btn-ghost--small" id="authBackEmail">← Voltar</button>
           </div>
-          <div class="auth-field">
-            <label for="authSignupPassword">Senha</label>
-            <input type="password" id="authSignupPassword" placeholder="Mínimo 6 caracteres" autocomplete="new-password">
-          </div>
-          <div class="auth-field">
-            <label for="authSignupReferral">Código de indicação (opcional)</label>
-            <input type="text" id="authSignupReferral" placeholder="Digite o código de quem te convidou">
-          </div>
-          <div id="authSignupError" class="auth-error" hidden></div>
-          <div id="authSignupSuccess" class="auth-success" hidden></div>
-          <button class="btn-primary auth-submit" id="authSignupBtn" type="button">Criar Conta</button>
         </div>
 
-        <div class="auth-divider">ou</div>
-        <button class="btn-secondary auth-submit" id="authLoginGoogle" type="button">Entrar com Google</button>
-
-        <p class="auth-note">Ao continuar, você concorda com nossos Termos de Serviço.</p>
+        <p class="auth-note">Você receberá um código por e-mail. Sem senhas, mais seguro.</p>
       </section>
 
       <section class="plans-panel">
