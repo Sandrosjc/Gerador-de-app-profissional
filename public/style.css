@@ -406,7 +406,6 @@ body{
   .context__hint{display:none;}
 }
 
-/* Bancada compacta: mantem o campo e os controles na primeira tela. */
 @media (min-width:821px){
   .bench{padding:18px 20px 14px;gap:11px;}
   .bench__brand{padding-bottom:11px;}
@@ -472,7 +471,6 @@ body{
   .conversion-carousel .empty-state__sub{font-size:14px;}
 }
 
-/* Direcao visual 2026: estudio claro, tipografia forte e acentos vivos. */
 :root{
   --ink:#101827;
   --ink-2:#f7f8fb;
@@ -756,4 +754,4 @@ body{
   cursor:pointer;
   transition:all .2s ease;
 }
-.checkout-plan strong{font-size:20px; color
+.checkout-plan strong{font-size:20px; color:var(--brass);}
