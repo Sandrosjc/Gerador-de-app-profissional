@@ -537,6 +537,80 @@ app.post('/api/sandbox-files', (req, res) => {
   }
 });
 
+// Publica o projeto atual como um repositório novo no GitHub do próprio usuário.
+// Usa o token de acesso do GitHub que o Firebase Auth entrega no login (com escopo "repo").
+app.post('/api/github/publicar', async (req, res) => {
+  const { githubToken, files, lang, nomeRepo } = req.body || {};
+  try {
+    if (!githubToken) {
+      return res.status(400).json({ error: 'Você precisa entrar com o GitHub antes de publicar.' });
+    }
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'Nenhum arquivo pra publicar ainda.' });
+    }
+
+    const nomeLimpo = String(nomeRepo || 'meu-app-chequetto')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 90) || 'meu-app-chequetto';
+
+    const headersGithub = {
+      Authorization: `token ${githubToken}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+    };
+
+    // 1. Cria o repositório
+    const criarResp = await fetch('https://api.github.com/user/repos', {
+      method: 'POST',
+      headers: headersGithub,
+      body: JSON.stringify({ name: nomeLimpo, description: 'Gerado com Chequetto/Oficina', private: false, auto_init: false }),
+    });
+    const repoData = await criarResp.json();
+    if (!criarResp.ok) {
+      return res.status(criarResp.status).json({ error: repoData.message || 'Não foi possível criar o repositório no GitHub.' });
+    }
+
+    // 2. Converte pro formato de projeto React real (com imports, package.json etc.)
+    const arquivosFinais = montarArquivosSandpack(files, lang || 'pt');
+    const listaArquivos = Object.entries(arquivosFinais).map(([caminho, obj]) => ({
+      caminho: caminho.replace(/^\//, ''),
+      conteudo: obj.code,
+    }));
+    listaArquivos.push({
+      caminho: 'README.md',
+      conteudo: `# ${repoData.name}\n\nGerado com [Chequetto/Oficina](https://gerador-de-app-profissional.onrender.com/).\n\nPra rodar localmente:\n\n\`\`\`\nnpm install\nnpm start\n\`\`\`\n`,
+    });
+
+    // 3. Envia cada arquivo pro repositório recém-criado
+    const falhas = [];
+    for (const arquivo of listaArquivos) {
+      const conteudoBase64 = Buffer.from(arquivo.conteudo, 'utf-8').toString('base64');
+      const putResp = await fetch(
+        `https://api.github.com/repos/${repoData.owner.login}/${repoData.name}/contents/${arquivo.caminho.split('/').map(encodeURIComponent).join('/')}`,
+        {
+          method: 'PUT',
+          headers: headersGithub,
+          body: JSON.stringify({ message: `Adiciona ${arquivo.caminho}`, content: conteudoBase64 }),
+        }
+      );
+      if (!putResp.ok) {
+        const erroArquivo = await putResp.json().catch(() => ({}));
+        falhas.push(arquivo.caminho);
+        console.warn(`Falha ao enviar ${arquivo.caminho} pro GitHub:`, erroArquivo.message);
+      }
+    }
+
+    res.json({ url: repoData.html_url, nome: repoData.name, falhas });
+  } catch (error) {
+    console.error('Erro ao publicar no GitHub:', error);
+    res.status(500).json({ error: 'Erro ao publicar no GitHub.' });
+  }
+});
+
 // ---------- Salvar app gerado na plataforma ----------
 // Sem sistema de login: o histórico "salvo" fica associado ao navegador
 // (localStorage, no script.js) — aqui só persistimos o registro em si.

@@ -30,6 +30,13 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 const githubProvider = new GithubAuthProvider();
+// Pede permissão de "repo" pra poder criar repositórios em nome do usuário
+// quando ele clicar em "Publicar no GitHub".
+githubProvider.addScope('repo');
+
+// Guarda o token de acesso do GitHub em memória (não persiste em disco) —
+// só existe enquanto a aba está aberta e o usuário está logado nesta sessão.
+let githubAccessToken = null;
 
 function publicUser(user) {
   if (!user) return null;
@@ -47,6 +54,7 @@ function notificar(user) {
 }
 
 onAuthStateChanged(auth, (user) => {
+  if (!user) githubAccessToken = null;
   notificar(user);
 });
 
@@ -61,7 +69,9 @@ async function signInWithGoogle() {
 
 async function signInWithGithub() {
   try {
-    await signInWithPopup(auth, githubProvider);
+    const resultado = await signInWithPopup(auth, githubProvider);
+    const credencial = GithubAuthProvider.credentialFromResult(resultado);
+    githubAccessToken = credencial?.accessToken || null;
   } catch (error) {
     console.error('[FIREBASE][GITHUB] erro ao entrar', error);
     alert('Não foi possível entrar com GitHub: ' + (error.message || 'erro desconhecido'));
@@ -71,9 +81,14 @@ async function signInWithGithub() {
 async function signOut() {
   try {
     await firebaseSignOut(auth);
+    githubAccessToken = null;
   } catch (error) {
     console.error('[FIREBASE][LOGOUT] erro ao sair', error);
   }
 }
 
-window.chequettoFirebase = { signInWithGoogle, signInWithGithub, signOut };
+function getGithubToken() {
+  return githubAccessToken;
+}
+
+window.chequettoFirebase = { signInWithGoogle, signInWithGithub, signOut, getGithubToken };

@@ -102,6 +102,7 @@
         <button class="btn-ghost" id="btnShareWhatsapp" type="button">📲 WhatsApp</button>
         <button class="btn-ghost" id="btnCopiar" disabled data-i18n="copy">Copiar código</button>
         <button class="btn-ghost" id="btnBaixar" disabled data-i18n="download">Baixar .html</button>
+        <button class="btn-ghost" id="btnPublicarGithub" disabled title="Cria um repositório novo no seu GitHub com este projeto">🐙 Publicar no GitHub</button>
         <button class="btn-secondary" id="btnSalvar" disabled data-i18n="save">Salvar na Oficina</button>
       </div>
     </div>
@@ -115,7 +116,14 @@
         <pre class="code-view" id="codeView" hidden><code id="codeViewText"></code></pre>
         <div class="sandbox-view" id="sandboxView" hidden>
           <p class="sandbox-view__hint" id="sandboxHint">Clique em "Sandbox real" depois de gerar um app pra ver ele rodando num bundler de verdade (Vite/Webpack, como no Lovable) — em vez do preview rápido padrão.</p>
-          <iframe id="sandboxFrame" title="Sandbox real" hidden></iframe>
+          <div class="sandbox-view__body" id="sandboxBody" hidden>
+            <iframe id="sandboxFrame" title="Sandbox real"></iframe>
+            <div class="sandbox-editor" id="sandboxEditor">
+              <div class="sandbox-editor__files" id="sandboxEditorFiles"></div>
+              <textarea class="sandbox-editor__textarea" id="sandboxEditorTextarea" spellcheck="false"></textarea>
+              <button class="btn-secondary" id="btnAplicarEdicaoSandbox" type="button">Aplicar alteração no sandbox</button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="empty-state" id="emptyState">

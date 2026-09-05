@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     emptyState: document.getElementById('emptyState'),
     btnCopiar: document.getElementById('btnCopiar'),
     btnBaixar: document.getElementById('btnBaixar'),
+    btnPublicarGithub: document.getElementById('btnPublicarGithub'),
     btnSalvar: document.getElementById('btnSalvar'),
     refineInput: document.getElementById('refineInput'),
     btnRefinar: document.getElementById('btnRefinar'),
@@ -70,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.historyList) el.historyList.innerHTML = '';
     if (el.btnCopiar) el.btnCopiar.disabled = true;
     if (el.btnBaixar) el.btnBaixar.disabled = true;
+    if (el.btnPublicarGithub) el.btnPublicarGithub.disabled = true;
     if (el.btnSalvar) el.btnSalvar.disabled = true;
     renderAttachedFiles();
   }
@@ -167,6 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.emptyState) el.emptyState.hidden = true;
     if (el.btnCopiar) el.btnCopiar.disabled = false;
     if (el.btnBaixar) el.btnBaixar.disabled = false;
+    if (el.btnPublicarGithub) el.btnPublicarGithub.disabled = false;
     if (el.btnSalvar) el.btnSalvar.disabled = false;
     if (el.btnRefinar) el.btnRefinar.disabled = false;
     state.promptAtual = promptText;
@@ -226,6 +229,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   restoreWorkspace();
 
+  // Mantém state.filesAtual em sincronia quando o usuário edita um arquivo
+  // direto na aba Sandbox real, pra refino/publicação no GitHub usarem a versão editada.
+  window.addEventListener('chequetto:sandbox-arquivos-editados', (event) => {
+    if (event.detail?.files) state.filesAtual = event.detail.files;
+  });
+
+
   // ---------- Modo Planejamento / Construção ----------
 
   function aplicarModo(modo) {
@@ -248,6 +258,11 @@ document.addEventListener('DOMContentLoaded', () => {
   el.modeSwitch?.querySelectorAll('[data-mode]').forEach((btn) => {
     btn.addEventListener('click', () => aplicarModo(btn.dataset.mode));
   });
+
+  // Sem isso, a caixinha de chat (discussaoLog) fica escondida até a pessoa
+  // clicar manualmente no seletor de modo — e como "Construção" já é o modo
+  // padrão, ninguém nunca via a resposta da IA. Aplica o modo inicial já na carga da página.
+  aplicarModo(modoAtual);
 
   function addDiscussaoMsg(texto, autor, { loading = false } = {}) {
     if (!el.discussaoLog) return null;
@@ -506,6 +521,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.stage === 'criando') {
           setStage('criando');
           if (el.status) el.status.textContent = data.message;
+          if (el.codeViewText) el.codeViewText.textContent = '';
+          document.querySelector('.tab[data-view="code"]')?.click();
+        }
+        if (data.stage === 'escrevendo_ao_vivo' && data.chunk) {
+          if (el.codeViewText) {
+            el.codeViewText.textContent += data.chunk;
+            if (el.codeView) el.codeView.scrollTop = el.codeView.scrollHeight;
+          }
         }
         if (data.stage === 'revisando') {
           if (el.status) el.status.textContent = data.message;
@@ -517,6 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (data.stage === 'salvo_temp') {
           showGeneratedCode(data.html, promptText);
+          document.querySelector('.tab[data-view="preview"]')?.click();
           state.filesAtual = data.files || [];
 
           state.historico.push({ prompt: promptText, code: data.html, plano: state.planoAtual });
@@ -707,6 +731,42 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (error) {
         el.btnSalvar.textContent = 'Erro ao salvar';
         setTimeout(() => { el.btnSalvar.textContent = original; el.btnSalvar.disabled = false; }, 1800);
+      }
+    });
+  }
+
+  if (el.btnPublicarGithub) {
+    el.btnPublicarGithub.addEventListener('click', async () => {
+      if (!state.filesAtual || state.filesAtual.length === 0) {
+        alert('Gere um aplicativo primeiro.');
+        return;
+      }
+      const token = window.chequettoFirebase?.getGithubToken?.();
+      if (!token) {
+        alert('Entre com o GitHub primeiro (o botão de login fica na área da conta). Se você já tinha entrado antes de recarregar a página, entre de novo — o acesso ao GitHub não fica salvo entre sessões, por segurança.');
+        return;
+      }
+      const nomeRepo = prompt('Nome do repositório no GitHub:', (state.promptAtual || 'meu-app-chequetto').slice(0, 40));
+      if (!nomeRepo) return;
+
+      const original = el.btnPublicarGithub.textContent;
+      el.btnPublicarGithub.disabled = true;
+      el.btnPublicarGithub.textContent = 'Publicando...';
+      try {
+        const res = await fetch('/api/github/publicar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ githubToken: token, files: state.filesAtual, nomeRepo }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Falha ao publicar');
+        el.btnPublicarGithub.textContent = 'Publicado ✓';
+        window.open(data.url, '_blank');
+      } catch (error) {
+        alert('Não foi possível publicar no GitHub: ' + error.message);
+        el.btnPublicarGithub.textContent = 'Erro ao publicar';
+      } finally {
+        setTimeout(() => { el.btnPublicarGithub.textContent = original; el.btnPublicarGithub.disabled = false; }, 2200);
       }
     });
   }

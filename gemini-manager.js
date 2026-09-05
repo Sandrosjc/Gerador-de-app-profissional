@@ -189,12 +189,15 @@ Se não encontrar nenhum problema, devolva os arquivos EXATAMENTE como estão, n
 NÃO adicione nenhuma funcionalidade nova — só corrija problemas reais que você encontrar.`;
 
 // Autorrevisão: manda o código de volta pra IA pra ela mesma achar e corrigir
-// erros óbvios antes de entregar. Se falhar em todas as chaves, entrega o
-// original sem travar o usuário — é um bônus de qualidade, não uma etapa obrigatória.
+// erros óbvios antes de entregar. Só é aceita se a resposta trouxer pelo menos
+// os mesmos arquivos que já existiam — se a IA "esquecer" algum arquivo no
+// formato da resposta, a revisão inteira é descartada e o original é mantido.
+// Nunca deve resultar em perder arquivos que já estavam prontos.
 async function revisarArquivos(arquivos, language = 'pt') {
   const keys = getApiKeys();
   if (keys.length === 0) return arquivos;
 
+  const caminhosOriginais = new Set(arquivos.map((arquivo) => arquivo.path));
   const listaAtual = arquivos
     .map((arquivo) => `===ARQUIVO: ${arquivo.path}===\n${arquivo.content}\n===FIM===`)
     .join('\n\n');
@@ -202,7 +205,12 @@ async function revisarArquivos(arquivos, language = 'pt') {
   for (const key of keys) {
     try {
       const texto = await chamarGemini(key, `${INSTRUCAO_REVISAO}\n\n${listaAtual}`);
-      return extrairArquivos(texto);
+      const revisados = extrairArquivos(texto);
+      const caminhosRevisados = new Set(revisados.map((arquivo) => arquivo.path));
+      const manteveTodosOsArquivos = [...caminhosOriginais].every((caminho) => caminhosRevisados.has(caminho));
+      if (manteveTodosOsArquivos) return revisados;
+      console.warn('Autorrevisão descartada: a resposta não trouxe todos os arquivos originais. Mantendo o código sem revisão.');
+      return arquivos;
     } catch (err) {
       console.warn('Erro na autorrevisão com uma das chaves, tentando a próxima...', err.message);
     }
@@ -229,6 +237,23 @@ async function chamarGemini(key, promptFinal) {
   const result = await model.generateContent(promptFinal);
   const response = await result.response;
   return response.text();
+}
+
+// Igual a chamarGemini, mas transmite cada pedaço de texto conforme a IA
+// escreve (via onChunk), pra a pessoa ver o código sendo gerado em tempo real.
+async function chamarGeminiStream(key, promptFinal, onChunk = () => {}) {
+  const genAI = new GoogleGenerativeAI(key);
+  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+  const resultado = await model.generateContentStream(promptFinal);
+  let textoCompleto = '';
+  for await (const pedaco of resultado.stream) {
+    const texto = pedaco.text();
+    if (texto) {
+      textoCompleto += texto;
+      onChunk(texto);
+    }
+  }
+  return textoCompleto;
 }
 
 // Gera o plano (etapa 1) e os arquivos do app (etapa 2), narrando cada etapa via onStep(texto)
@@ -263,7 +288,9 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
   for (const key of keys) {
     try {
       const promptFinal = `${INSTRUCAO_GLOBAL}\n\nIdioma obrigatório do aplicativo e dos textos: ${language}.\n${INSTRUCAO_CODIGO}\n\nPedido do usuário: ${prompt}\n\nPlano a seguir:\n${plano.join('\n')}${errosConhecidosTexto()}`;
-      const textoBruto = await chamarGemini(key, promptFinal);
+      const textoBruto = await chamarGeminiStream(key, promptFinal, (pedaco) => {
+        onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
+      });
       let files = extrairArquivos(textoBruto);
 
       onStep({ stage: 'revisando', message: 'Revisando o código antes de entregar...' });
@@ -311,7 +338,9 @@ ${listaAtual}${errosConhecidosTexto()}`;
   let ultimoErro = null;
   for (const key of keys) {
     try {
-      let files = extrairArquivos(await chamarGemini(key, instrucao));
+      let files = extrairArquivos(await chamarGeminiStream(key, instrucao, (pedaco) => {
+        onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
+      }));
 
       onStep({ stage: 'revisando', message: 'Revisando a alteração antes de entregar...' });
       files = await revisarArquivos(files, language);
