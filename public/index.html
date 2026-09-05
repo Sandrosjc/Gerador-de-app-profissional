@@ -85,13 +85,13 @@
     </div>
     <div class="bench__footer">Oficina v1.0</div>
   </aside>
-
   <!-- ===================== PALCO / PREVIEW ===================== -->
   <main class="stage">
     <div class="stage__bar">
       <div class="stage__tabs">
         <button class="tab is-active" data-view="preview" data-i18n="preview">Prévia</button>
         <button class="tab" data-view="code" data-i18n="code">Código</button>
+        <button class="tab" data-view="sandbox">🧪 Sandbox real</button>
       </div>
       <div class="stage__devices">
         <button class="device is-active" data-width="100%" title="Desktop" data-i18n="desktop">Desktop</button>
@@ -113,6 +113,10 @@
       <div class="frame-wrap" id="frameWrap">
         <iframe id="previewFrame" hidden></iframe>
         <pre class="code-view" id="codeView" hidden><code id="codeViewText"></code></pre>
+        <div class="sandbox-view" id="sandboxView" hidden>
+          <p class="sandbox-view__hint" id="sandboxHint">Clique em "Sandbox real" depois de gerar um app pra ver ele rodando num bundler de verdade (Vite/Webpack, como no Lovable) — em vez do preview rápido padrão.</p>
+          <iframe id="sandboxFrame" title="Sandbox real" hidden></iframe>
+        </div>
       </div>
       <div class="empty-state" id="emptyState">
         <div class="conversion-carousel" aria-live="polite">
@@ -138,52 +142,11 @@
   </main>
 </div>
 
-<!-- ===================== JANELA DE AUTENTICAÇÃO ===================== -->
+<!-- ===================== JANELA DE PLANOS ===================== -->
 <div class="modal-overlay" id="authModalOverlay" hidden>
   <div class="auth-modal" id="authModal">
     <button class="auth-modal__close" id="closeAuthModal">×</button>
     <div class="auth-layout">
-      <section class="auth-panel">
-        <p class="auth-kicker">CHEQUETTO</p>
-        <h2>Entre com seu e-mail</h2>
-        <p class="auth-lead">Receba um código de verificação de 6 dígitos no seu e-mail.</p>
-
-        <!-- STEP 1: Email -->
-        <div id="authEmailStep">
-          <div class="auth-field">
-            <label for="authEmail">Endereço de e-mail</label>
-            <input type="email" id="authEmail" placeholder="seu.email@exemplo.com" autocomplete="email">
-          </div>
-          <div class="auth-field">
-            <label for="authReferral">Código de indicação (opcional)</label>
-            <input type="text" id="authReferral" placeholder="Digite o código de quem te convidou">
-          </div>
-          <div id="authError" class="auth-error" hidden></div>
-          <div id="authSuccess" class="auth-success" hidden></div>
-          <button class="btn-primary auth-submit" id="authSendCode">Enviar código</button>
-          <div class="auth-divider">ou</div>
-          <button class="btn-secondary auth-submit" id="authLoginGoogle">Entrar com Google</button>
-        </div>
-
-        <!-- STEP 2: Código -->
-        <div id="authCodeStep" hidden>
-          <p class="auth-lead">Insira o código de 6 dígitos enviado para <strong id="authEmailDisplay"></strong></p>
-          <div class="auth-field">
-            <label for="authCode">Código de verificação</label>
-            <input type="text" id="authCode" placeholder="000000" maxlength="6" autocomplete="one-time-code">
-          </div>
-          <div id="authError2" class="auth-error" hidden></div>
-          <div id="authSuccess2" class="auth-success" hidden></div>
-          <button class="btn-primary auth-submit" id="authVerifyCode">Verificar e Entrar</button>
-          <div style="display:flex; justify-content:space-between; margin-top:8px;">
-            <button class="btn-ghost btn-ghost--small" id="authResendCode" disabled>Reenviar código <span id="authCountdown" hidden>60</span></button>
-            <button class="btn-ghost btn-ghost--small" id="authBackEmail">← Voltar</button>
-          </div>
-        </div>
-
-        <p class="auth-note">Você receberá um código por e-mail. Sem senhas, mais seguro.</p>
-      </section>
-
       <section class="plans-panel">
         <p class="auth-kicker">PLANOS</p>
         <h2>Escolha seu ritmo.</h2>
@@ -222,7 +185,6 @@
   </div>
 </div>
 
-<!-- ===================== CHECKOUT ===================== -->
 <div class="checkout-overlay" id="checkoutModalOverlay" hidden>
   <div class="checkout-sheet" id="checkoutModal">
     <button class="auth-modal__close" id="closeCheckoutModal">×</button>
@@ -271,6 +233,8 @@
 
 <script src="i18n.js?v=20260825-2"></script>
 <script src="script.js?v=20260825-2"></script>
+<script type="module" src="firebase-auth.js"></script>
+<script type="module" src="sandbox-real.js"></script>
 <script src="conta.js?v=20260825-2"></script>
 </body>
 </html>

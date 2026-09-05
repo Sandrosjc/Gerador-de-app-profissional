@@ -46,7 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
     promptDraft: '',
     planoAtual: [],
     historico: [],
-    attachedFiles: []
+    attachedFiles: [],
+    filesAtual: []
   };
 
   function storageKey(baseKey) {
@@ -225,6 +226,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   restoreWorkspace();
 
+  // ---------- Modo Planejamento / Construção ----------
+
   function aplicarModo(modo) {
     modoAtual = modo;
     el.modeSwitch?.querySelectorAll('[data-mode]').forEach((btn) => {
@@ -232,13 +235,12 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.classList.toggle('is-active', ativo);
       btn.setAttribute('aria-selected', String(ativo));
     });
+    if (el.discussaoLog) el.discussaoLog.hidden = false;
     if (modo === 'planejar') {
-      if (el.discussaoLog) el.discussaoLog.hidden = false;
       if (el.modeHint) el.modeHint.textContent = 'Modo Planejamento: converse com a IA sobre o app antes de construir. Não gasta crédito.';
       if (el.btnGerarLabel) el.btnGerarLabel.textContent = 'Perguntar';
     } else {
-      if (el.discussaoLog) el.discussaoLog.hidden = true;
-      if (el.modeHint) el.modeHint.textContent = 'Modo Construção: cada geração usa 1 crédito. Descreva o app e clique em Gerar.';
+      if (el.modeHint) el.modeHint.textContent = 'Modo Construção: cada geração usa 1 crédito. Descreva o app e clique em Gerar — a IA conversa com você a cada passo.';
       if (el.btnGerarLabel) el.btnGerarLabel.textContent = 'Gerar App';
     }
   }
@@ -281,6 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
       addDiscussaoMsg('Erro: ' + error.message, 'ia');
     }
   }
+
+  // ---------- Sugestões automáticas da IA (chips clicáveis) ----------
 
   async function buscarSugestoes(files) {
     if (!el.sugestoesChips || !files || !files.length) return;
@@ -368,6 +372,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  // ===================== MICROFONE (falar em vez de digitar) =====================
   (function setupMic() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -483,6 +488,9 @@ document.addEventListener('DOMContentLoaded', () => {
       state.promptAtual = promptText;
       if (el.planoList) { el.planoList.innerHTML = ''; el.planoList.hidden = true; }
       setStage('planejando');
+      addDiscussaoMsg(basePrompt || 'Gerar a partir dos arquivos anexados', 'user');
+      if (el.prompt) el.prompt.value = '';
+      const bubbleConstrucao = addDiscussaoMsg('Analisando seu pedido...', 'ia', { loading: true });
 
       const language = window.chequettoI18n?.getLanguage?.() || 'pt';
       const source = new EventSource('/generate/stream?prompt=' + encodeURIComponent(promptText) + '&lang=' + encodeURIComponent(language));
@@ -493,10 +501,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.stage === 'planejando' && data.plano) {
           renderPlano(data.plano);
           state.planoAtual = data.plano;
+          bubbleConstrucao.textContent = 'Aqui está meu plano:\n' + data.plano.map((item) => '• ' + item).join('\n') + '\n\nEscrevendo o código agora...';
         }
         if (data.stage === 'criando') {
           setStage('criando');
           if (el.status) el.status.textContent = data.message;
+        }
+        if (data.stage === 'revisando') {
+          if (el.status) el.status.textContent = data.message;
+          if (bubbleConstrucao) bubbleConstrucao.textContent = 'Revisando o código antes de te entregar...';
         }
         if (data.stage === 'planejando' && !data.plano) {
           if (el.status) el.status.textContent = data.message;
@@ -504,6 +517,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (data.stage === 'salvo_temp') {
           showGeneratedCode(data.html, promptText);
+          state.filesAtual = data.files || [];
 
           state.historico.push({ prompt: promptText, code: data.html, plano: state.planoAtual });
           renderHistory();
@@ -511,12 +525,16 @@ document.addEventListener('DOMContentLoaded', () => {
           window.chequettoCredits?.refresh?.();
           buscarSugestoes(data.files);
 
+          bubbleConstrucao.classList.remove('discussao-msg--loading');
+          bubbleConstrucao.textContent = 'Pronto! Seu app está na aba Prévia. Quer que eu ajuste alguma coisa? É só me contar.';
           if (el.status) el.status.textContent = 'Aplicativo gerado com sucesso!';
           setLoading(false);
           source.close();
         }
 
         if (data.stage === 'erro') {
+          bubbleConstrucao.classList.remove('discussao-msg--loading');
+          bubbleConstrucao.textContent = 'Deu erro ao gerar: ' + data.message;
           if (el.status) el.status.textContent = 'Erro: ' + data.message;
           setLoading(false);
           source.close();
@@ -567,13 +585,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.btnMeusProjetos.disabled = true;
     el.btnMeusProjetos.innerHTML = '<span>...</span> Carregando projetos';
     try {
-      const res = await fetch('/api/projects');
-      if (res.status === 401) {
-        if (el.status) el.status.textContent = 'Entre na sua conta para acessar seus projetos salvos.';
-        return;
-      }
-      const data = await res.json();
-      const projetos = data.projects || [];
+      const projetos = JSON.parse(localStorage.getItem(storageKey(SAVED_PROJECTS_STORAGE_KEY)) || '[]');
       if (!projetos.length) {
         if (el.status) el.status.textContent = 'Nenhum projeto salvo ainda.';
         return;
@@ -608,6 +620,8 @@ document.addEventListener('DOMContentLoaded', () => {
     el.btnRefinar.disabled = true;
     el.btnRefinar.textContent = 'Aplicando...';
     if (el.status) el.status.textContent = 'A IA está atualizando seu aplicativo...';
+    addDiscussaoMsg(pedido, 'user');
+    const bubbleRefino = addDiscussaoMsg('Aplicando o ajuste...', 'ia', { loading: true });
     try {
       const res = await fetch('/refine', {
         method: 'POST',
@@ -617,13 +631,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Falha ao refinar');
       showGeneratedCode(data.code, state.promptAtual + ' / ' + pedido);
+      state.filesAtual = data.files || [];
       state.historico.push({ prompt: 'Ajuste: ' + pedido, code: data.code, plano: state.planoAtual });
       renderHistory();
       persistWorkspace();
       buscarSugestoes(data.files);
       if (el.refineInput) el.refineInput.value = '';
+      bubbleRefino.classList.remove('discussao-msg--loading');
+      bubbleRefino.textContent = 'Pronto, apliquei essa alteração! Dá uma olhada na Prévia.';
       if (el.status) el.status.textContent = 'Alteração aplicada com sucesso!';
     } catch (error) {
+      bubbleRefino.classList.remove('discussao-msg--loading');
+      bubbleRefino.textContent = 'Não consegui aplicar: ' + error.message;
       if (el.status) el.status.textContent = 'Erro: ' + error.message;
     } finally {
       el.btnRefinar.disabled = false;
@@ -706,12 +725,12 @@ document.addEventListener('DOMContentLoaded', () => {
         el.tabs.forEach(t => t.classList.remove('is-active'));
         tab.classList.add('is-active');
         const view = tab.getAttribute('data-view');
-        if (view === 'preview') {
-          if (el.previewFrame) el.previewFrame.hidden = false;
-          if (el.codeView) el.codeView.hidden = true;
-        } else {
-          if (el.previewFrame) el.previewFrame.hidden = true;
-          if (el.codeView) el.codeView.hidden = false;
+        if (el.previewFrame) el.previewFrame.hidden = view !== 'preview';
+        if (el.codeView) el.codeView.hidden = view !== 'code';
+        const sandboxView = document.getElementById('sandboxView');
+        if (sandboxView) sandboxView.hidden = view !== 'sandbox';
+        if (view === 'sandbox') {
+          window.chequettoSandbox?.render(state.filesAtual || []);
         }
       });
     });

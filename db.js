@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS anon_credits (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS error_history (
+  id TEXT PRIMARY KEY,
+  pedido TEXT NOT NULL,
+  resumo_erro TEXT,
+  resumo_solucao TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ip_signups (
   ip TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -293,6 +301,20 @@ function deductAnonCredit(ip) {
   return getAnonCredits(ip);
 }
 
+// ---------- Memória de erros já corrigidos (pra IA não repetir) ----------
+
+function registrarErro({ pedido, resumoErro, resumoSolucao }) {
+  const id = newId();
+  db.prepare(
+    'INSERT INTO error_history (id, pedido, resumo_erro, resumo_solucao) VALUES (?, ?, ?, ?)'
+  ).run(id, pedido, resumoErro || pedido, resumoSolucao || null);
+  return db.prepare('SELECT * FROM error_history WHERE id = ?').get(id);
+}
+
+function listarErrosRecentes(limite = 8) {
+  return db.prepare('SELECT * FROM error_history ORDER BY created_at DESC LIMIT ?').all(limite);
+}
+
 module.exports = {
   CREDIT_RULES,
   createUser,
@@ -316,4 +338,6 @@ module.exports = {
   createPendingSubscription,
   getAnonCredits,
   deductAnonCredit,
+  registrarErro,
+  listarErrosRecentes,
 };

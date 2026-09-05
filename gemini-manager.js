@@ -1,4 +1,14 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { registrarErro, listarErrosRecentes } = require('./db');
+
+// Palavras que indicam que um pedido de refino é "corrigir um erro" (e não
+// só adicionar uma funcionalidade nova) — usado pra alimentar a memória de erros.
+const PALAVRAS_DE_ERRO = ['erro', 'bug', 'não funciona', 'nao funciona', 'quebrou', 'quebrado', 'não abre', 'nao abre', 'corrig', 'consert', 'falha', 'travou', 'trava '];
+
+function pareceCorrecaoDeErro(pedido) {
+  const texto = String(pedido || '').toLowerCase();
+  return PALAVRAS_DE_ERRO.some((palavra) => texto.includes(palavra));
+}
 
 function getApiKeys() {
   const keys = (process.env.GEMINI_API_KEYS || '')
@@ -173,6 +183,46 @@ Regras obrigatórias:
 - NÃO escreva nenhuma explicação, comentário fora do código, introdução ou blocos de markdown com \`\`\`.
 - NÃO use os marcadores "===ARQUIVO===" ou "===FIM===" dentro do próprio código de um arquivo.`;
 
+const INSTRUCAO_REVISAO = `Você é um revisor de código React sênior, extremamente cauteloso. Releia os arquivos abaixo com atenção total, procurando erros reais: JSX mal fechado, hooks usados fora de uma função de componente, variáveis ou componentes usados mas nunca definidos, chaves/parênteses desbalanceados, "key" ausente em listas.
+Se encontrar algum problema, corrija e devolva TODOS os arquivos completos e corrigidos, no MESMO formato abaixo (===ARQUIVO: caminho=== ... ===FIM===).
+Se não encontrar nenhum problema, devolva os arquivos EXATAMENTE como estão, no mesmo formato, sem mudar nada.
+NÃO adicione nenhuma funcionalidade nova — só corrija problemas reais que você encontrar.`;
+
+// Autorrevisão: manda o código de volta pra IA pra ela mesma achar e corrigir
+// erros óbvios antes de entregar. Se falhar em todas as chaves, entrega o
+// original sem travar o usuário — é um bônus de qualidade, não uma etapa obrigatória.
+async function revisarArquivos(arquivos, language = 'pt') {
+  const keys = getApiKeys();
+  if (keys.length === 0) return arquivos;
+
+  const listaAtual = arquivos
+    .map((arquivo) => `===ARQUIVO: ${arquivo.path}===\n${arquivo.content}\n===FIM===`)
+    .join('\n\n');
+
+  for (const key of keys) {
+    try {
+      const texto = await chamarGemini(key, `${INSTRUCAO_REVISAO}\n\n${listaAtual}`);
+      return extrairArquivos(texto);
+    } catch (err) {
+      console.warn('Erro na autorrevisão com uma das chaves, tentando a próxima...', err.message);
+    }
+  }
+  return arquivos;
+}
+
+// Memória de erros: busca os últimos problemas já relatados/corrigidos e
+// devolve um texto pronto pra injetar no prompt, pra IA não repetir a causa.
+function errosConhecidosTexto() {
+  try {
+    const erros = listarErrosRecentes(6);
+    if (!erros.length) return '';
+    const linhas = erros.map((erro) => `- Pedido do usuário: "${erro.pedido}" → o que resolveu: ${erro.resumo_solucao || 'ajuste aplicado no refino'}`);
+    return `\n\nErros já relatados e corrigidos antes nesta plataforma (evite reintroduzir essas mesmas causas de novo):\n${linhas.join('\n')}`;
+  } catch {
+    return '';
+  }
+}
+
 async function chamarGemini(key, promptFinal) {
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
@@ -212,9 +262,13 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
   onStep({ stage: 'criando', message: 'Escrevendo o código do aplicativo...' });
   for (const key of keys) {
     try {
-      const promptFinal = `${INSTRUCAO_GLOBAL}\n\nIdioma obrigatório do aplicativo e dos textos: ${language}.\n${INSTRUCAO_CODIGO}\n\nPedido do usuário: ${prompt}\n\nPlano a seguir:\n${plano.join('\n')}`;
+      const promptFinal = `${INSTRUCAO_GLOBAL}\n\nIdioma obrigatório do aplicativo e dos textos: ${language}.\n${INSTRUCAO_CODIGO}\n\nPedido do usuário: ${prompt}\n\nPlano a seguir:\n${plano.join('\n')}${errosConhecidosTexto()}`;
       const textoBruto = await chamarGemini(key, promptFinal);
-      const files = extrairArquivos(textoBruto);
+      let files = extrairArquivos(textoBruto);
+
+      onStep({ stage: 'revisando', message: 'Revisando o código antes de entregar...' });
+      files = await revisarArquivos(files, language);
+
       const html = montarShellReact(files, language);
       onStep({ stage: 'concluido', message: 'Aplicativo pronto!' });
       return { html, files, plano };
@@ -251,13 +305,25 @@ Devolva a lista COMPLETA e atualizada de arquivos, no mesmo formato — inclusiv
 Pedido de refinamento: ${pedido}
 
 Arquivos atuais:
-${listaAtual}`;
+${listaAtual}${errosConhecidosTexto()}`;
 
   onStep({ stage: 'refinando', message: 'Aplicando as alterações no aplicativo...' });
   let ultimoErro = null;
   for (const key of keys) {
     try {
-      const files = extrairArquivos(await chamarGemini(key, instrucao));
+      let files = extrairArquivos(await chamarGemini(key, instrucao));
+
+      onStep({ stage: 'revisando', message: 'Revisando a alteração antes de entregar...' });
+      files = await revisarArquivos(files, language);
+
+      if (pareceCorrecaoDeErro(pedido)) {
+        try {
+          registrarErro({ pedido, resumoErro: pedido, resumoSolucao: 'Corrigido via refino (revisão automática aplicada).' });
+        } catch (err) {
+          console.warn('Não foi possível registrar na memória de erros (não bloqueia o refino):', err.message);
+        }
+      }
+
       const html = montarShellReact(files, language);
       onStep({ stage: 'concluido', message: 'Alteração aplicada!' });
       return { html, files };
@@ -323,4 +389,70 @@ async function sugerirMelhorias(files) {
   return [];
 }
 
-module.exports = { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, getApiKeys };
+// ---------- Conversão pro Sandbox real (Sandpack / bundler de verdade) ----------
+// Nossos arquivos são gerados em "escopo global" (sem import/export) de propósito,
+// pra funcionar no shell de HTML único (Babel standalone). Pro sandbox real
+// (bundler de verdade, tipo Lovable), precisamos de módulos ES de verdade —
+// então convertemos aqui, sem precisar mudar o jeito que a IA gera o código.
+
+function nomeDoComponente(conteudo) {
+  const match = String(conteudo || '').match(/function\s+([A-Za-z0-9_]+)\s*\(/);
+  return match ? match[1] : null;
+}
+
+function caminhoRelativo(deArquivo, paraArquivo) {
+  const path = require('path');
+  const dirDe = path.dirname(deArquivo); // '.' quando o arquivo está na raiz
+  let rel = path.relative(dirDe, paraArquivo).replace(/\.jsx?$/, '').split(path.sep).join('/');
+  if (!rel.startsWith('.')) rel = './' + rel;
+  return rel;
+}
+
+function montarArquivosSandpack(arquivos, language = 'pt') {
+  const lista = Array.isArray(arquivos) ? arquivos : [];
+  const mapaComponentes = {};
+  lista.forEach((arquivo) => {
+    const nome = nomeDoComponente(arquivo.content);
+    if (nome) mapaComponentes[nome] = arquivo.path;
+  });
+
+  const sandpackFiles = {};
+
+  lista.forEach((arquivo) => {
+    const nomeProprio = nomeDoComponente(arquivo.content);
+    const usados = new Set();
+    Object.keys(mapaComponentes).forEach((nomeComponente) => {
+      if (nomeComponente === nomeProprio) return;
+      const regexUso = new RegExp(`<${nomeComponente}[\\s/>]`);
+      if (regexUso.test(arquivo.content)) usados.add(nomeComponente);
+    });
+
+    const importsComponentes = [...usados]
+      .map((nomeComponente) => `import ${nomeComponente} from '${caminhoRelativo(arquivo.path, mapaComponentes[nomeComponente])}';`)
+      .join('\n');
+
+    const cabecalho = `import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';\n${importsComponentes ? importsComponentes + '\n' : ''}`;
+    const rodape = nomeProprio ? `\n\nexport default ${nomeProprio};` : '';
+    const caminho = '/' + arquivo.path.replace(/\.jsx$/, '.js');
+
+    sandpackFiles[caminho] = { code: `${cabecalho}\n${arquivo.content}${rodape}` };
+  });
+
+  sandpackFiles['/index.js'] = {
+    code: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\n\nReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
+  };
+
+  sandpackFiles['/public/index.html'] = {
+    code: `<!DOCTYPE html>\n<html lang="${language}">\n<head>\n<meta charset="UTF-8" />\n<script src="https://cdn.tailwindcss.com"></script>\n</head>\n<body>\n<div id="root"></div>\n</body>\n</html>`,
+  };
+
+  sandpackFiles['/package.json'] = {
+    code: JSON.stringify({
+      dependencies: { react: '18.2.0', 'react-dom': '18.2.0', 'react-scripts': '5.0.1' },
+    }, null, 2),
+  };
+
+  return sandpackFiles;
+}
+
+module.exports = { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, montarArquivosSandpack, getApiKeys };
