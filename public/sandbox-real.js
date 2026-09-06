@@ -11,6 +11,7 @@ let clientAtual = null;
 let carregando = false;
 let arquivosAtuais = [];
 let arquivoSelecionado = null;
+let modoImportado = false; // true quando os arquivos vieram de um repositório real (já com imports)
 
 // Corre uma Promise contra um cronômetro — se estourar o tempo, rejeita com
 // uma mensagem clara em vez de deixar a pessoa olhando um símbolo girando pra sempre.
@@ -21,11 +22,11 @@ function comLimiteDeTempo(promessa, ms, mensagemTimeout) {
   ]);
 }
 
-async function montarArquivosNoServidor(files) {
+async function montarArquivosNoServidor(files, jaTemImports = false) {
   const res = await fetch('/api/sandbox-files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ files, lang: document.documentElement.lang || 'pt' }),
+    body: JSON.stringify({ files, lang: document.documentElement.lang || 'pt', jaTemImports }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'Erro ao montar arquivos do sandbox');
@@ -71,7 +72,7 @@ async function aplicarEdicao() {
   botaoAplicar.disabled = true;
   botaoAplicar.textContent = 'Aplicando...';
   try {
-    const sandpackFiles = await montarArquivosNoServidor(arquivosAtuais);
+    const sandpackFiles = await montarArquivosNoServidor(arquivosAtuais, modoImportado);
     await clientAtual.updateSandbox({ files: sandpackFiles, template: 'create-react-app' });
     // Avisa o script.js que os arquivos mudaram, pra manter tudo em sincronia
     // (refino, publicar no GitHub, etc. devem usar a versão editada).
@@ -89,7 +90,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnAplicarEdicaoSandbox')?.addEventListener('click', aplicarEdicao);
 });
 
-async function render(files) {
+async function render(files, jaTemImports = false) {
   const hint = document.getElementById('sandboxHint');
   const body = document.getElementById('sandboxBody');
   const frame = document.getElementById('sandboxFrame');
@@ -108,6 +109,7 @@ async function render(files) {
   carregando = true;
   arquivosAtuais = files.map((arquivo) => ({ ...arquivo }));
   arquivoSelecionado = null;
+  modoImportado = jaTemImports;
 
   if (hint) {
     hint.hidden = false;
@@ -116,7 +118,7 @@ async function render(files) {
   if (body) body.hidden = true;
 
   try {
-    const sandpackFiles = await montarArquivosNoServidor(files);
+    const sandpackFiles = await montarArquivosNoServidor(files, jaTemImports);
 
     if (!clientAtual) {
       clientAtual = await comLimiteDeTempo(

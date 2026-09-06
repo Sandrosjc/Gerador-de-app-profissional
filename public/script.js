@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCopiar: document.getElementById('btnCopiar'),
     btnBaixar: document.getElementById('btnBaixar'),
     btnBaixarZip: document.getElementById('btnBaixarZip'),
+    btnImportarGithub: document.getElementById('btnImportarGithub'),
     btnPublicarGithub: document.getElementById('btnPublicarGithub'),
     btnSalvar: document.getElementById('btnSalvar'),
     refineInput: document.getElementById('refineInput'),
@@ -771,6 +772,48 @@ document.addEventListener('DOMContentLoaded', () => {
       } finally {
         el.btnBaixarZip.disabled = false;
         el.btnBaixarZip.textContent = original;
+      }
+    });
+  }
+
+  if (el.btnImportarGithub) {
+    el.btnImportarGithub.addEventListener('click', async () => {
+      const token = window.chequettoFirebase?.getGithubToken?.();
+      if (!token) {
+        alert('Entre com o GitHub primeiro (na área da conta) pra poder importar um repositório.');
+        return;
+      }
+      const entrada = prompt('Repositório do GitHub (formato dono/nome, ex: fulano/meu-app):');
+      if (!entrada || !entrada.includes('/')) {
+        if (entrada) alert('Use o formato dono/nome, ex: fulano/meu-app.');
+        return;
+      }
+      const [owner, repo] = entrada.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/$/, '').split('/');
+
+      const original = el.btnImportarGithub.textContent;
+      el.btnImportarGithub.disabled = true;
+      el.btnImportarGithub.textContent = 'Importando...';
+      try {
+        const res = await fetch('/api/github/importar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ githubToken: token, owner, repo }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Falha ao importar');
+
+        state.filesAtual = data.files || [];
+        state.promptAtual = data.nome || entrada;
+        if (el.emptyState) el.emptyState.hidden = true;
+        if (el.btnBaixarZip) el.btnBaixarZip.disabled = false;
+        if (el.btnPublicarGithub) el.btnPublicarGithub.disabled = false;
+        document.querySelector('.tab[data-view="sandbox"]')?.click();
+        window.chequettoSandbox?.render(state.filesAtual, true);
+      } catch (error) {
+        alert('Não foi possível importar o repositório: ' + error.message);
+      } finally {
+        el.btnImportarGithub.disabled = false;
+        el.btnImportarGithub.textContent = original;
       }
     });
   }

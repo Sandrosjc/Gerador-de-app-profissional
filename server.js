@@ -9,7 +9,7 @@ const XLSX = require('xlsx');
 const dotenv = require('dotenv');
 dotenv.config();
 const cookieParser = require('cookie-parser');
-const { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, montarArquivosSandpack, getApiKeys } = require('./gemini-manager');
+const { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, montarArquivosSandpack, templateSandpackPara, prepararArquivosImportados, getApiKeys } = require('./gemini-manager');
 const {
   createUser,
   getUserByEmail,
@@ -528,13 +528,81 @@ app.post('/api/sugestoes', async (req, res) => {
 // ---------- Sandbox real (bundler de verdade, via Sandpack) ----------
 
 app.post('/api/sandbox-files', (req, res) => {
-  const { files, lang } = req.body || {};
+  const { files, lang, jaTemImports } = req.body || {};
   try {
-    const sandpackFiles = montarArquivosSandpack(Array.isArray(files) ? files : [], lang || 'pt');
-    res.json({ files: sandpackFiles });
+    const listaArquivos = Array.isArray(files) ? files : [];
+    const sandpackFiles = jaTemImports
+      ? prepararArquivosImportados(listaArquivos)
+      : montarArquivosSandpack(listaArquivos, lang || 'pt');
+    const template = jaTemImports ? 'create-react-app' : templateSandpackPara(listaArquivos);
+    res.json({ files: sandpackFiles, template });
   } catch (error) {
     console.error('Erro ao montar arquivos do sandbox:', error);
     res.status(500).json({ error: error.message || 'Erro ao montar sandbox' });
+  }
+});
+
+// Puxa os arquivos de um repositório do GitHub pra dentro do Chequetto, pra
+// rodar/editar na aba Sandbox real. Diferente do "Publicar", aqui é o
+// caminho inverso: trazer um repositório existente pra dentro da plataforma.
+app.post('/api/github/importar', async (req, res) => {
+  const { githubToken, owner, repo } = req.body || {};
+  try {
+    if (!githubToken) {
+      return res.status(400).json({ error: 'Você precisa entrar com o GitHub antes de importar.' });
+    }
+    if (!owner || !repo) {
+      return res.status(400).json({ error: 'Informe o repositório no formato dono/nome (ex: fulano/meu-app).' });
+    }
+
+    const headersGithub = {
+      Authorization: `token ${githubToken}`,
+      Accept: 'application/vnd.github+json',
+    };
+
+    const repoInfoResp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: headersGithub });
+    const repoInfo = await repoInfoResp.json();
+    if (!repoInfoResp.ok) {
+      return res.status(repoInfoResp.status).json({ error: repoInfo.message || 'Repositório não encontrado ou sem acesso.' });
+    }
+    const branchPadrao = repoInfo.default_branch || 'main';
+
+    const treeResp = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${branchPadrao}?recursive=1`,
+      { headers: headersGithub }
+    );
+    const treeData = await treeResp.json();
+    if (!treeResp.ok) {
+      return res.status(treeResp.status).json({ error: treeData.message || 'Não foi possível ler os arquivos do repositório.' });
+    }
+
+    const EXTENSOES_ACEITAS = ['.js', '.jsx', '.ts', '.tsx', '.css', '.html', '.json', '.md'];
+    const IGNORAR = ['node_modules/', 'package-lock.json', '.git/', 'dist/', 'build/', 'yarn.lock'];
+
+    const arquivosRelevantes = (treeData.tree || [])
+      .filter((item) => item.type === 'blob')
+      .filter((item) => EXTENSOES_ACEITAS.some((ext) => item.path.endsWith(ext)))
+      .filter((item) => !IGNORAR.some((prefixo) => item.path.startsWith(prefixo) || item.path.includes('/' + prefixo)))
+      .filter((item) => !item.size || item.size < 200000)
+      .slice(0, 60);
+
+    if (arquivosRelevantes.length === 0) {
+      return res.status(400).json({ error: 'Não encontrei arquivos de código reconhecíveis nesse repositório.' });
+    }
+
+    const arquivos = [];
+    for (const item of arquivosRelevantes) {
+      const blobResp = await fetch(item.url, { headers: headersGithub });
+      const blobData = await blobResp.json();
+      if (!blobResp.ok || !blobData.content) continue;
+      const conteudo = Buffer.from(blobData.content, blobData.encoding || 'base64').toString('utf-8');
+      arquivos.push({ path: item.path, content: conteudo });
+    }
+
+    res.json({ files: arquivos, nome: repoInfo.name });
+  } catch (error) {
+    console.error('Erro ao importar do GitHub:', error);
+    res.status(500).json({ error: 'Erro ao importar do GitHub.' });
   }
 });
 

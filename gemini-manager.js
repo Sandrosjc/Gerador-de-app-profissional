@@ -1,5 +1,14 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const path = require('path');
 const { registrarErro, listarErrosRecentes } = require('./db');
+
+// Nome do modelo configurável por variável de ambiente — NÃO fixo no código.
+// Lição aprendida com uma versão anterior deste projeto: a Google desativou
+// o gemini-1.5-flash de uma hora pra outra, e como o nome estava fixo no
+// código, quebrou tudo até alguém corrigir e re-implantar manualmente. Com
+// isso configurável, dá pra trocar o modelo só mudando a variável de
+// ambiente no Render, sem precisar mexer em código nem esperar um novo deploy.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 // Palavras que indicam que um pedido de refino é "corrigir um erro" (e não
 // só adicionar uma funcionalidade nova) — usado pra alimentar a memória de erros.
@@ -22,148 +31,70 @@ function getApiKeys() {
   return [...new Set(keys)];
 }
 
-// ---------- Extração e (re)montagem de arquivos multi-componente ----------
-
-// Extrai o código de um componente único (fallback para quando a IA não
-// segue o formato de múltiplos arquivos, ou para compatibilidade com o
-// formato antigo de componente único).
-function extrairComponenteReact(texto) {
-  const blocoMarkdown = texto.match(/```(?:jsx|javascript|js|tsx)?\s*([\s\S]*?)```/i);
-  let codigo = blocoMarkdown ? blocoMarkdown[1] : texto;
-  const inicio = codigo.search(/function\s+App\s*\(/);
-  if (inicio !== -1) codigo = codigo.slice(inicio);
-  return codigo.trim();
-}
-
-// Extrai a lista de arquivos da resposta bruta da IA, no formato:
-// ===ARQUIVO: caminho/Nome.jsx===
-// <código>
-// ===FIM===
-// Formato escolhido (em vez de JSON) para não sofrer com problemas de
-// escape de aspas/quebras de linha dentro do código gerado.
-function extrairArquivos(texto) {
-  const regex = /===ARQUIVO:\s*([^\n=]+?)\s*===\n([\s\S]*?)\n===FIM===/g;
-  const arquivos = [];
-  let match;
-  while ((match = regex.exec(texto)) !== null) {
-    const path = match[1].trim();
-    const content = match[2].trim();
-    if (path && content) arquivos.push({ path, content });
+// ---------- Extração do HTML gerado (lógica comprovada da versão anterior) ----------
+// Em vez de exigir um formato customizado nosso (marcadores ===ARQUIVO===) que
+// a IA precisa "aprender" a seguir à risca, pedimos direto um HTML completo —
+// formato natural que o modelo já sabe produzir bem — e extraímos com váRIAS
+// estratégias de fallback, na ordem de mais específica pra mais tolerante.
+function extrairHtml(texto) {
+  const blocoMarkdown = texto.match(/```(?:html)?\s*([\s\S]*?)```/i);
+  if (blocoMarkdown) {
+    return blocoMarkdown[1].trim();
   }
-
-  if (arquivos.length === 0) {
-    // a IA não seguiu o formato pedido: trata a resposta inteira como App.jsx
-    arquivos.push({ path: 'App.jsx', content: extrairComponenteReact(texto) });
+  const doctypeIndex = texto.search(/<!DOCTYPE html>/i);
+  const htmlIndex = texto.search(/<html/i);
+  const start = doctypeIndex !== -1 ? doctypeIndex : htmlIndex;
+  if (start !== -1) {
+    return texto.slice(start).trim();
   }
-  if (!arquivos.some((arquivo) => arquivo.path === 'App.jsx')) {
-    throw new Error('A resposta da IA não incluiu o arquivo App.jsx.');
-  }
-  return arquivos;
+  return texto.trim();
 }
 
-// Variante "estrita" pra uso em diffs (refino/revisão): não tem fallback de
-// "trata tudo como App.jsx" nem exige App.jsx presente, porque nesses casos
-// é normal e esperado a resposta trazer só uma parte dos arquivos (ou nenhum,
-// se não houve mudança). Uma resposta sem nenhum marcador válido aqui deve
-// significar "não veio nada aproveitável", não "aqui está um App.jsx novo".
-function extrairArquivosDiff(texto) {
-  const regex = /===ARQUIVO:\s*([^\n=]+?)\s*===\n([\s\S]*?)\n===FIM===/g;
-  const arquivos = [];
-  let match;
-  while ((match = regex.exec(texto)) !== null) {
-    const path = match[1].trim();
-    const content = match[2].trim();
-    if (path && content) arquivos.push({ path, content });
-  }
-  return arquivos;
-}
-
-// Mescla uma lista de arquivos "alterados" (diff) sobre a lista original.
-// Arquivos que não vierem na lista de alterados continuam como estavam;
-// arquivos que vierem são atualizados (ou adicionados, se forem novos).
-// É assim que se evita ter que pedir pra IA reescrever o app inteiro a cada
-// pequeno ajuste — resposta menor, mais rápida, e com muito menos risco de
-// ser cortada por limite de tamanho.
-function mesclarArquivos(originais, alterados) {
-  const mapa = new Map(originais.map((arquivo) => [arquivo.path, { ...arquivo }]));
-  alterados.forEach((arquivo) => mapa.set(arquivo.path, { ...arquivo }));
-  return [...mapa.values()];
-}
-
-// Garante que App.jsx seja sempre o último a ser declarado/renderizado,
-// já que ele referencia os demais componentes.
-function ordenarParaRenderizacao(arquivos) {
-  const app = arquivos.find((arquivo) => arquivo.path === 'App.jsx');
-  const outros = arquivos.filter((arquivo) => arquivo.path !== 'App.jsx');
-  return [...outros, app];
-}
-
-// Detecta o idioma declarado no <html lang="..."> de um shell já montado.
+// Detecta o idioma declarado no <html lang="...">, se houver.
 function detectarIdiomaDoShell(html) {
   const match = String(html || '').match(/<html\s+lang="([a-z]{2})"/i);
   return match ? match[1] : 'pt';
 }
 
-// Extrai de volta a lista de arquivos de dentro do shell HTML já montado
-// (usado no refinamento, pra não reenviar todo o boilerplate de CDN pra IA
-// nem perder a divisão em arquivos entre uma geração e outra).
-function extrairArquivosDoShell(html) {
-  const texto = String(html || '');
-  const regex = /<script type="text\/babel" data-presets="react" data-arquivo="([^"]+)">\n([\s\S]*?)\n<\/script>/g;
-  const arquivos = [];
-  let match;
-  while ((match = regex.exec(texto)) !== null) {
-    arquivos.push({ path: match[1], content: match[2].trim() });
+// Separa o HTML único (que a IA gera de forma confiável) em arquivos de
+// verdade: index.html, style.css e script.js — um repositório real, igual
+// ferramentas como o Lovable entregam. Feito por código determinístico (não
+// pedindo pra IA seguir mais um formato customizado), então não tem risco
+// de quebrar por causa de a IA "não seguir o formato direito".
+function dividirHtmlEmArquivos(html) {
+  let restante = String(html || '');
+
+  let css = '';
+  restante = restante.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, conteudo) => {
+    css += conteudo + '\n';
+    return '';
+  });
+
+  // Só puxa pra fora os <script> SEM atributo src (código escrito pela IA);
+  // scripts com src (CDNs como React/Tailwind) continuam no HTML, intocados.
+  let js = '';
+  restante = restante.replace(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi, (match, conteudo) => {
+    js += conteudo + '\n';
+    return '';
+  });
+
+  const temCss = css.trim().length > 0;
+  const temJs = js.trim().length > 0;
+
+  if (temCss && /<\/head>/i.test(restante)) {
+    restante = restante.replace(/<\/head>/i, '<link rel="stylesheet" href="style.css">\n</head>');
   }
-  if (arquivos.length > 0) return arquivos;
+  if (temJs && /<\/body>/i.test(restante)) {
+    restante = restante.replace(/<\/body>/i, '<script src="script.js"></script>\n</body>');
+  }
 
-  // compatibilidade com o formato antigo (componente único, sem data-arquivo)
-  const antigo = texto.match(/data-presets="react">\s*const \{ useState[\s\S]*?\n\n([\s\S]*?)\n\nReactDOM\.createRoot/);
-  if (antigo) return [{ path: 'App.jsx', content: antigo[1].trim() }];
-
-  return [{ path: 'App.jsx', content: extrairComponenteReact(texto) }];
-}
-
-// Monta o HTML completo e autocontido a partir dos arquivos gerados:
-// React, ReactDOM e Babel standalone via CDN (compila JSX no navegador) + Tailwind CDN.
-// Cada arquivo vira um <script type="text/babel"> próprio, na mesma página —
-// scripts clássicos (não-módulo) compartilham o mesmo escopo global/léxico,
-// então os componentes conseguem se chamar uns aos outros sem import/export.
-// O resultado final continua sendo um único HTML — mantém 100% de compatibilidade
-// com o preview em iframe, o "Baixar .html" e o "Salvar na Oficina" já existentes.
-function montarShellReact(arquivos, language = 'pt') {
-  const ordenados = ordenarParaRenderizacao(arquivos);
-  const blocosArquivos = ordenados
-    .map((arquivo) => `<script type="text/babel" data-presets="react" data-arquivo="${arquivo.path}">\n${arquivo.content}\n</script>`)
-    .join('\n');
-
-  return `<!DOCTYPE html>
-<html lang="${language}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>App gerado — Oficina</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>html,body,#root{height:100%;margin:0;}</style>
-</head>
-<body>
-<div id="root"></div>
-<script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef, useMemo, useCallback } = React;
-</script>
-${blocosArquivos}
-<script type="text/babel" data-presets="react">
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
-</script>
-</body>
-</html>`;
+  const arquivos = [{ path: 'index.html', content: restante.trim() }];
+  if (temCss) arquivos.push({ path: 'style.css', content: css.trim() });
+  if (temJs) arquivos.push({ path: 'script.js', content: js.trim() });
+  return arquivos;
 }
 
 function extrairLista(texto) {
-  // pega linhas que parecem itens de lista (-, *, ou numeradas) e limpa
   const linhas = texto
     .split('\n')
     .map((l) => l.trim())
@@ -174,76 +105,30 @@ function extrairLista(texto) {
 }
 
 const INSTRUCAO_GLOBAL = `REGRAS PERMANENTES DA PLATAFORMA:
-1. Ao atualizar, corrigir ou ajustar um aplicativo existente, preserve todo o código e comportamento que já funcionam. Faça somente as alterações necessárias no arquivo correto; nunca reescreva tudo do zero.
-2. O app deve manter seu estado e dados de forma persistente. Use useState/useEffect junto com localStorage ou IndexedDB: salve cada alteração relevante e restaure o estado assim que o componente montar.
+1. Ao atualizar, corrigir ou ajustar um aplicativo existente, preserve todo o código e comportamento que já funcionam. Faça somente as alterações necessárias no local correto; nunca reescreva o projeto inteiro do zero.
+2. O projeto deve manter seu estado e dados de forma persistente. Implemente salvamento automático e restauração após atualização, fechamento ou reinicialização da página, sem perder o progresso do usuário.
+   Para dados do app no navegador, use localStorage ou IndexedDB: salve cada alteração relevante e restaure o estado assim que a página abrir.
 3. Siga exatamente o que foi pedido pelo usuário. Não invente funcionalidades, telas, textos ou mudanças que não foram solicitadas.
-4. Se o trabalho for grande, organize a implementação em blocos coerentes (arquivos/componentes bem divididos), revise cada bloco e corrija os erros antes de entregar.
-5. Antes de entregar, confira sintaxe JSX, hooks usados corretamente e se todas as funcionalidades solicitadas estão presentes em algum dos arquivos.
-6. Essas regras fazem parte do produto e devem ser aplicadas em todos os aplicativos gerados.`;
+4. Se o trabalho for grande, organize a implementação em blocos coerentes, revise cada bloco e corrija os erros antes de entregar. A resposta final ainda deve ser um único HTML completo, autocontido e funcionando.
+5. Antes de entregar, confira sintaxe, referências entre HTML/CSS/JavaScript e se todas as funcionalidades solicitadas estão presentes.
+6. Essas regras fazem parte do produto e devem ser aplicadas em todos os aplicativos e sites gerados.`;
 
-const INSTRUCAO_PLANO = `Você é o planejador do Oficina, um gerador de mini-aplicativos web em React.
+const INSTRUCAO_PLANO = `Você é o planejador do Oficina, um gerador de mini-aplicativos web.
 Dado o pedido do usuário, responda com uma lista curta (3 a 5 itens) em português, cada item em uma linha
 começando com "-", descrevendo os passos que você vai seguir para construir o app (ex: "Criar a estrutura da lista de tarefas",
 "Adicionar campo de prioridade e prazo", "Estilizar com visual escuro e dourado"). Seja direto, sem explicações extras,
 sem introdução, apenas a lista.`;
 
-const INSTRUCAO_CODIGO = `Você é um gerador de mini-aplicativos web usando React 18 e Tailwind CSS.
-Organize o app em um ou mais arquivos de componente (divida em mais arquivos só quando isso deixar o código mais organizado — apps simples podem ter um único arquivo).
+const INSTRUCAO_CODIGO = `Você é um gerador de mini-aplicativos web.
+Responda APENAS com o código HTML completo (incluindo <style> e <script> internos, tudo em um único arquivo autocontido — pode usar Tailwind via <script src="https://cdn.tailwindcss.com"></script> pra estilizar rápido, ou CSS próprio no <style>).
+NÃO escreva nenhuma explicação, introdução, comentário ou lista de funcionalidades antes ou depois do código.
+NÃO use blocos de markdown com \`\`\`.
+Sua resposta deve começar diretamente com <!DOCTYPE html> e terminar com </html>.`;
 
-Responda ESTRITAMENTE neste formato de texto simples, um bloco por arquivo, nada além disso:
-
-===ARQUIVO: App.jsx===
-function App() {
-  ...
-}
-===FIM===
-
-===ARQUIVO: components/NomeDoComponente.jsx===
-function NomeDoComponente() {
-  ...
-}
-===FIM===
-
-Regras obrigatórias:
-- Sempre inclua um arquivo "App.jsx" contendo "function App() {...}" — é o componente raiz, o único que é renderizado diretamente.
-- Cada arquivo define exatamente um componente funcional (uma função por arquivo), com hooks (useState, useEffect etc.) quando necessário e Tailwind para todo o estilo.
-- NÃO use import/export. Os componentes de arquivos diferentes compartilham o mesmo escopo global e podem ser chamados diretamente uns pelos outros só pelo nome da função (ex: <NomeDoComponente />).
-- React, ReactDOM e os hooks (useState, useEffect, useRef, useMemo, useCallback) já estão disponíveis globalmente, não precisa importar.
-- NÃO escreva nenhuma explicação, comentário fora do código, introdução ou blocos de markdown com \`\`\`.
-- NÃO use os marcadores "===ARQUIVO===" ou "===FIM===" dentro do próprio código de um arquivo.`;
-
-const INSTRUCAO_REVISAO = `Você é um revisor de código React sênior, extremamente cauteloso. Releia os arquivos abaixo com atenção total, procurando erros reais: JSX mal fechado, hooks usados fora de uma função de componente, variáveis ou componentes usados mas nunca definidos, chaves/parênteses desbalanceados, "key" ausente em listas.
-IMPORTANTE: devolva APENAS os arquivos que você realmente precisou corrigir, no formato ===ARQUIVO: caminho=== ... ===FIM===. NÃO inclua arquivos que já estavam certos — omita-os completamente da resposta, não repita o que não mudou.
-Se nenhum arquivo tiver problema, responda só com a palavra OK, sem mais nada.
+const INSTRUCAO_REVISAO = `Você é um revisor sênior de código web, extremamente cauteloso. Releia o HTML abaixo com atenção total, procurando erros reais: tags não fechadas, JavaScript com erro de sintaxe, funções chamadas mas nunca definidas, chaves/parênteses desbalanceados, elementos referenciados por getElementById que não existem.
+Se encontrar problemas, corrija e devolva o HTML COMPLETO corrigido, seguindo as mesmas regras (só o HTML, sem explicação, sem markdown, começando com <!DOCTYPE html>).
+Se não encontrar nenhum problema, responda só com a palavra OK, sem mais nada.
 NÃO adicione nenhuma funcionalidade nova — só corrija problemas reais que você encontrar.`;
-
-// Autorrevisão: manda o código de volta pra IA pra ela mesma achar e corrigir
-// erros óbvios antes de entregar. A IA devolve só os arquivos que corrigiu
-// (formato diff) — o restante é mantido como já estava, mesclando por caminho.
-// Isso deixa a resposta bem menor (menos risco de ser cortada por tamanho) e
-// nunca perde arquivo: o que não vier de volta simplesmente continua igual.
-async function revisarArquivos(arquivos, language = 'pt') {
-  const keys = getApiKeys();
-  if (keys.length === 0) return arquivos;
-
-  const listaAtual = arquivos
-    .map((arquivo) => `===ARQUIVO: ${arquivo.path}===\n${arquivo.content}\n===FIM===`)
-    .join('\n\n');
-
-  for (const key of keys) {
-    try {
-      const texto = await chamarGemini(key, `${INSTRUCAO_REVISAO}\n\n${listaAtual}`);
-      if (texto.trim().toUpperCase().startsWith('OK')) return arquivos; // revisão não achou nada pra corrigir
-      const corrigidos = extrairArquivosDiff(texto);
-      if (!corrigidos.length) return arquivos; // resposta sem marcadores válidos: não arrisca, mantém original
-      return mesclarArquivos(arquivos, corrigidos);
-      return arquivos;
-    } catch (err) {
-      console.warn('Erro na autorrevisão com uma das chaves, tentando a próxima...', err.message);
-    }
-  }
-  return arquivos;
-}
 
 // Memória de erros: busca os últimos problemas já relatados/corrigidos e
 // devolve um texto pronto pra injetar no prompt, pra IA não repetir a causa.
@@ -260,7 +145,7 @@ function errosConhecidosTexto() {
 
 async function chamarGemini(key, promptFinal) {
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash', generationConfig: { maxOutputTokens: 8192 } });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { maxOutputTokens: 8192 } });
   const result = await model.generateContent(promptFinal);
   const response = await result.response;
   const motivoParada = response.candidates?.[0]?.finishReason;
@@ -274,7 +159,7 @@ async function chamarGemini(key, promptFinal) {
 // escreve (via onChunk), pra a pessoa ver o código sendo gerado em tempo real.
 async function chamarGeminiStream(key, promptFinal, onChunk = () => {}) {
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash', generationConfig: { maxOutputTokens: 8192 } });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { maxOutputTokens: 8192 } });
   const resultado = await model.generateContentStream(promptFinal);
   let textoCompleto = '';
   for await (const pedaco of resultado.stream) {
@@ -292,7 +177,29 @@ async function chamarGeminiStream(key, promptFinal, onChunk = () => {}) {
   return textoCompleto;
 }
 
-// Gera o plano (etapa 1) e os arquivos do app (etapa 2), narrando cada etapa via onStep(texto)
+// Autorrevisão: manda o HTML de volta pra IA pra ela mesma achar e corrigir
+// erros óbvios antes de entregar. Como agora é só 1 arquivo, a resposta ou é
+// o HTML corrigido inteiro, ou "OK" — sem risco de "esquecer" outros arquivos
+// (não existem outros arquivos pra esquecer).
+async function revisarHtml(html, language = 'pt') {
+  const keys = getApiKeys();
+  if (keys.length === 0) return html;
+
+  for (const key of keys) {
+    try {
+      const texto = await chamarGemini(key, `${INSTRUCAO_REVISAO}\n\nHTML atual:\n${html}`);
+      if (texto.trim().toUpperCase().startsWith('OK')) return html;
+      const corrigido = extrairHtml(texto);
+      // proteção básica: só aceita se realmente parecer um documento HTML válido
+      return corrigido && /<html[\s>]/i.test(corrigido) ? corrigido : html;
+    } catch (err) {
+      console.warn('Erro na autorrevisão com uma das chaves, tentando a próxima...', err.message);
+    }
+  }
+  return html;
+}
+
+// Gera o plano (etapa 1) e o HTML completo do app (etapa 2), narrando cada etapa via onStep(texto)
 async function gerarComGemini(prompt, history = [], onStep = () => {}, language = 'pt') {
   const keys = getApiKeys();
   if (keys.length === 0) {
@@ -319,7 +226,7 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
   }
   onStep({ stage: 'planejando', message: 'Plano pronto', plano });
 
-  // ETAPA 2: gerar os arquivos de verdade
+  // ETAPA 2: gerar o HTML de verdade
   onStep({ stage: 'criando', message: 'Escrevendo o código do aplicativo...' });
   for (const key of keys) {
     try {
@@ -327,12 +234,12 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
       const textoBruto = await chamarGeminiStream(key, promptFinal, (pedaco) => {
         onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
       });
-      let files = extrairArquivos(textoBruto);
+      let html = extrairHtml(textoBruto);
 
       onStep({ stage: 'revisando', message: 'Revisando o código antes de entregar...' });
-      files = await revisarArquivos(files, language);
+      html = await revisarHtml(html, language);
 
-      const html = montarShellReact(files, language);
+      const files = [{ path: 'index.html', content: html }];
       onStep({ stage: 'concluido', message: 'Aplicativo pronto!' });
       return { html, files, plano };
     } catch (err) {
@@ -352,23 +259,19 @@ async function refinarComGemini(htmlAtual, pedido, onStep = () => {}) {
   const keys = getApiKeys();
   if (keys.length === 0) throw new Error('Nenhuma chave de API configurada.');
 
-  const arquivosAtuais = extrairArquivosDoShell(htmlAtual);
   const language = detectarIdiomaDoShell(htmlAtual);
-  const listaAtual = arquivosAtuais
-    .map((arquivo) => `===ARQUIVO: ${arquivo.path}===\n${arquivo.content}\n===FIM===`)
-    .join('\n\n');
 
   const instrucao = `${INSTRUCAO_GLOBAL}
 
 ${INSTRUCAO_CODIGO}
 
-Você está refinando um aplicativo React existente, já organizado em arquivos. Preserve tudo que já funciona.
-IMPORTANTE: devolva APENAS os arquivos que você criou ou precisou modificar pra atender o pedido — NÃO repita arquivos que não mudaram, omita-os completamente da resposta. Se o pedido só afeta um arquivo, devolva só esse arquivo.
+Você está refinando um aplicativo existente. Preserve tudo que já funciona e aplique somente as mudanças pedidas.
+Garanta que o resultado continue sendo um único documento HTML completo e autocontido.
 
 Pedido de refinamento: ${pedido}
 
-Arquivos atuais:
-${listaAtual}${errosConhecidosTexto()}`;
+Código atual:
+${htmlAtual}${errosConhecidosTexto()}`;
 
   onStep({ stage: 'refinando', message: 'Aplicando as alterações no aplicativo...' });
   let ultimoErro = null;
@@ -377,14 +280,10 @@ ${listaAtual}${errosConhecidosTexto()}`;
       const textoBruto = await chamarGeminiStream(key, instrucao, (pedaco) => {
         onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
       });
-      const arquivosAlterados = extrairArquivosDiff(textoBruto);
-      if (!arquivosAlterados.length) {
-        throw new Error('A IA não devolveu nenhum arquivo alterado nessa tentativa.');
-      }
-      let files = mesclarArquivos(arquivosAtuais, arquivosAlterados);
+      let html = extrairHtml(textoBruto);
 
       onStep({ stage: 'revisando', message: 'Revisando a alteração antes de entregar...' });
-      files = await revisarArquivos(files, language);
+      html = await revisarHtml(html, language);
 
       if (pareceCorrecaoDeErro(pedido)) {
         try {
@@ -394,7 +293,7 @@ ${listaAtual}${errosConhecidosTexto()}`;
         }
       }
 
-      const html = montarShellReact(files, language);
+      const files = [{ path: 'index.html', content: html }];
       onStep({ stage: 'concluido', message: 'Alteração aplicada!' });
       return { html, files };
     } catch (err) {
@@ -410,7 +309,7 @@ Aqui você está no MODO PLANEJAMENTO: converse com a pessoa, tire dúvidas, sug
 NÃO gere código nenhum e NÃO produza um app aqui — isso só acontece no Modo Construção, separadamente.
 Seja direto, útil e breve (poucos parágrafos curtos, sem enrolação). Responda em português.`;
 
-const INSTRUCAO_SUGESTOES = `Você é o consultor do Oficina. Olhando o código de um app React que acabou de ser gerado, sugira 3 melhorias profissionais de alto nível que a pessoa poderia pedir em seguida.
+const INSTRUCAO_SUGESTOES = `Você é o consultor do Oficina. Olhando o código de um app que acabou de ser gerado, sugira 3 melhorias profissionais de alto nível que a pessoa poderia pedir em seguida.
 Responda com exatamente 3 linhas, cada uma começando com "-", curtas (até 8 palavras), no imperativo (ex: "Adicionar validação de formulário", "Criar modo escuro", "Adicionar filtro de busca").
 Nada além das 3 linhas — sem introdução, sem explicação.`;
 
@@ -444,7 +343,7 @@ async function sugerirMelhorias(files) {
   if (keys.length === 0) return [];
 
   const resumoArquivos = (files || [])
-    .map((arquivo) => `// ${arquivo.path}\n${arquivo.content.slice(0, 600)}`)
+    .map((arquivo) => `// ${arquivo.path}\n${arquivo.content.slice(0, 2000)}`)
     .join('\n\n');
 
   for (const key of keys) {
@@ -460,10 +359,6 @@ async function sugerirMelhorias(files) {
 }
 
 // ---------- Conversão pro Sandbox real (Sandpack / bundler de verdade) ----------
-// Nossos arquivos são gerados em "escopo global" (sem import/export) de propósito,
-// pra funcionar no shell de HTML único (Babel standalone). Pro sandbox real
-// (bundler de verdade, tipo Lovable), precisamos de módulos ES de verdade —
-// então convertemos aqui, sem precisar mudar o jeito que a IA gera o código.
 
 function nomeDoComponente(conteudo) {
   const match = String(conteudo || '').match(/function\s+([A-Za-z0-9_]+)\s*\(/);
@@ -471,15 +366,39 @@ function nomeDoComponente(conteudo) {
 }
 
 function caminhoRelativo(deArquivo, paraArquivo) {
-  const path = require('path');
-  const dirDe = path.dirname(deArquivo); // '.' quando o arquivo está na raiz
+  const dirDe = path.dirname(deArquivo);
   let rel = path.relative(dirDe, paraArquivo).replace(/\.jsx?$/, '').split(path.sep).join('/');
   if (!rel.startsWith('.')) rel = './' + rel;
   return rel;
 }
 
+// Converte os arquivos gerados pro formato que o Sandpack entende.
+// Caso principal (hoje): um único HTML autocontido — usa o template "static"
+// do Sandpack, que serve o HTML direto, sem bundler nenhum (mais simples e confiável).
+// Caso legado: se algum projeto salvo antes ainda estiver no formato antigo de
+// múltiplos componentes React (sem import/export), monta como React/CRA.
 function montarArquivosSandpack(arquivos, language = 'pt') {
   const lista = Array.isArray(arquivos) ? arquivos : [];
+
+  const ehHtmlUnico = lista.length === 1 && /<!DOCTYPE html>|<html[\s>]/i.test(lista[0].content || '');
+  if (ehHtmlUnico) {
+    const arquivosSeparados = dividirHtmlEmArquivos(lista[0].content);
+    const sandpackFiles = {};
+    arquivosSeparados.forEach((arquivo) => {
+      sandpackFiles['/' + arquivo.path] = { code: arquivo.content };
+    });
+    sandpackFiles['/package.json'] = {
+      code: JSON.stringify({
+        name: 'meu-app-chequetto',
+        version: '0.1.0',
+        private: true,
+        scripts: { start: 'npx --yes serve -s . -l 3000' },
+      }, null, 2),
+    };
+    return sandpackFiles;
+  }
+
+  // ---- formato legado (múltiplos componentes React sem import/export) ----
   const mapaComponentes = {};
   lista.forEach((arquivo) => {
     const nome = nomeDoComponente(arquivo.content);
@@ -511,23 +430,16 @@ function montarArquivosSandpack(arquivos, language = 'pt') {
   sandpackFiles['/index.js'] = {
     code: `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\n\nReactDOM.createRoot(document.getElementById('root')).render(<App />);`,
   };
-
   sandpackFiles['/public/index.html'] = {
     code: `<!DOCTYPE html>\n<html lang="${language}">\n<head>\n<meta charset="UTF-8" />\n<script src="https://cdn.tailwindcss.com"></script>\n</head>\n<body>\n<div id="root"></div>\n</body>\n</html>`,
   };
-
   sandpackFiles['/package.json'] = {
     code: JSON.stringify({
       name: 'meu-app-chequetto',
       version: '0.1.0',
       private: true,
       dependencies: { react: '18.2.0', 'react-dom': '18.2.0', 'react-scripts': '5.0.1' },
-      scripts: {
-        start: 'react-scripts start',
-        build: 'react-scripts build',
-        test: 'react-scripts test',
-        eject: 'react-scripts eject',
-      },
+      scripts: { start: 'react-scripts start', build: 'react-scripts build', test: 'react-scripts test', eject: 'react-scripts eject' },
       eslintConfig: { extends: ['react-app'] },
       browserslist: {
         production: ['>0.2%', 'not dead', 'not op_mini all'],
@@ -539,4 +451,71 @@ function montarArquivosSandpack(arquivos, language = 'pt') {
   return sandpackFiles;
 }
 
-module.exports = { gerarComGemini, refinarComGemini, discutirComGemini, sugerirMelhorias, montarArquivosSandpack, getApiKeys };
+// Diz ao front qual template do Sandpack usar pros arquivos que acabaram de
+// ser montados — "static" pro HTML único (caso comum), "create-react-app"
+// pro formato legado de múltiplos componentes.
+function templateSandpackPara(arquivos) {
+  const lista = Array.isArray(arquivos) ? arquivos : [];
+  const ehHtmlUnico = lista.length === 1 && /<!DOCTYPE html>|<html[\s>]/i.test(lista[0].content || '');
+  return ehHtmlUnico ? 'static' : 'create-react-app';
+}
+
+// Igual ao montarArquivosSandpack, mas pra arquivos que JÁ vieram de um
+// repositório real (imports de verdade, própria estrutura de pastas) — como
+// os que a IA gera aqui são um HTML único, essa variante não tenta "adivinhar"
+// nada, só empacota o que já veio pronto. Usada só pelo importar do GitHub.
+function prepararArquivosImportados(arquivos) {
+  const lista = Array.isArray(arquivos) ? arquivos : [];
+  const sandpackFiles = {};
+  let temPackageJson = false;
+  let temIndexHtml = false;
+  let temEntryPoint = false;
+
+  lista.forEach((arquivo) => {
+    const caminho = '/' + arquivo.path.replace(/^\/+/, '');
+    sandpackFiles[caminho] = { code: arquivo.content };
+    if (caminho === '/package.json') temPackageJson = true;
+    if (caminho === '/public/index.html' || caminho === '/index.html') temIndexHtml = true;
+    if (['/index.js', '/index.jsx', '/src/index.js', '/src/index.jsx'].includes(caminho)) temEntryPoint = true;
+  });
+
+  if (!temIndexHtml) {
+    sandpackFiles['/public/index.html'] = {
+      code: `<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8" />\n<script src="https://cdn.tailwindcss.com"></script>\n</head>\n<body>\n<div id="root"></div>\n</body>\n</html>`,
+    };
+  }
+
+  if (!temPackageJson) {
+    sandpackFiles['/package.json'] = {
+      code: JSON.stringify({
+        name: 'projeto-importado',
+        version: '0.1.0',
+        private: true,
+        dependencies: { react: '18.2.0', 'react-dom': '18.2.0', 'react-scripts': '5.0.1' },
+        scripts: { start: 'react-scripts start', build: 'react-scripts build' },
+      }, null, 2),
+    };
+  }
+
+  if (!temEntryPoint) {
+    const temApp = Object.keys(sandpackFiles).some((c) => /\/App\.(js|jsx|tsx)$/.test(c));
+    sandpackFiles['/index.js'] = {
+      code: temApp
+        ? `import React from 'react';\nimport ReactDOM from 'react-dom/client';\nimport App from './App';\n\nReactDOM.createRoot(document.getElementById('root')).render(<App />);`
+        : `import React from 'react';\nimport ReactDOM from 'react-dom/client';\n\nReactDOM.createRoot(document.getElementById('root')).render(<div>Repositório importado — abra o arquivo certo na aba de edição pra ver o componente principal.</div>);`,
+    };
+  }
+
+  return sandpackFiles;
+}
+
+module.exports = {
+  gerarComGemini,
+  refinarComGemini,
+  discutirComGemini,
+  sugerirMelhorias,
+  montarArquivosSandpack,
+  templateSandpackPara,
+  prepararArquivosImportados,
+  getApiKeys,
+};
