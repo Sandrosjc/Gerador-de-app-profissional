@@ -61,6 +61,35 @@ function extrairArquivos(texto) {
   return arquivos;
 }
 
+// Variante "estrita" pra uso em diffs (refino/revisão): não tem fallback de
+// "trata tudo como App.jsx" nem exige App.jsx presente, porque nesses casos
+// é normal e esperado a resposta trazer só uma parte dos arquivos (ou nenhum,
+// se não houve mudança). Uma resposta sem nenhum marcador válido aqui deve
+// significar "não veio nada aproveitável", não "aqui está um App.jsx novo".
+function extrairArquivosDiff(texto) {
+  const regex = /===ARQUIVO:\s*([^\n=]+?)\s*===\n([\s\S]*?)\n===FIM===/g;
+  const arquivos = [];
+  let match;
+  while ((match = regex.exec(texto)) !== null) {
+    const path = match[1].trim();
+    const content = match[2].trim();
+    if (path && content) arquivos.push({ path, content });
+  }
+  return arquivos;
+}
+
+// Mescla uma lista de arquivos "alterados" (diff) sobre a lista original.
+// Arquivos que não vierem na lista de alterados continuam como estavam;
+// arquivos que vierem são atualizados (ou adicionados, se forem novos).
+// É assim que se evita ter que pedir pra IA reescrever o app inteiro a cada
+// pequeno ajuste — resposta menor, mais rápida, e com muito menos risco de
+// ser cortada por limite de tamanho.
+function mesclarArquivos(originais, alterados) {
+  const mapa = new Map(originais.map((arquivo) => [arquivo.path, { ...arquivo }]));
+  alterados.forEach((arquivo) => mapa.set(arquivo.path, { ...arquivo }));
+  return [...mapa.values()];
+}
+
 // Garante que App.jsx seja sempre o último a ser declarado/renderizado,
 // já que ele referencia os demais componentes.
 function ordenarParaRenderizacao(arquivos) {
@@ -184,20 +213,19 @@ Regras obrigatórias:
 - NÃO use os marcadores "===ARQUIVO===" ou "===FIM===" dentro do próprio código de um arquivo.`;
 
 const INSTRUCAO_REVISAO = `Você é um revisor de código React sênior, extremamente cauteloso. Releia os arquivos abaixo com atenção total, procurando erros reais: JSX mal fechado, hooks usados fora de uma função de componente, variáveis ou componentes usados mas nunca definidos, chaves/parênteses desbalanceados, "key" ausente em listas.
-Se encontrar algum problema, corrija e devolva TODOS os arquivos completos e corrigidos, no MESMO formato abaixo (===ARQUIVO: caminho=== ... ===FIM===).
-Se não encontrar nenhum problema, devolva os arquivos EXATAMENTE como estão, no mesmo formato, sem mudar nada.
+IMPORTANTE: devolva APENAS os arquivos que você realmente precisou corrigir, no formato ===ARQUIVO: caminho=== ... ===FIM===. NÃO inclua arquivos que já estavam certos — omita-os completamente da resposta, não repita o que não mudou.
+Se nenhum arquivo tiver problema, responda só com a palavra OK, sem mais nada.
 NÃO adicione nenhuma funcionalidade nova — só corrija problemas reais que você encontrar.`;
 
 // Autorrevisão: manda o código de volta pra IA pra ela mesma achar e corrigir
-// erros óbvios antes de entregar. Só é aceita se a resposta trouxer pelo menos
-// os mesmos arquivos que já existiam — se a IA "esquecer" algum arquivo no
-// formato da resposta, a revisão inteira é descartada e o original é mantido.
-// Nunca deve resultar em perder arquivos que já estavam prontos.
+// erros óbvios antes de entregar. A IA devolve só os arquivos que corrigiu
+// (formato diff) — o restante é mantido como já estava, mesclando por caminho.
+// Isso deixa a resposta bem menor (menos risco de ser cortada por tamanho) e
+// nunca perde arquivo: o que não vier de volta simplesmente continua igual.
 async function revisarArquivos(arquivos, language = 'pt') {
   const keys = getApiKeys();
   if (keys.length === 0) return arquivos;
 
-  const caminhosOriginais = new Set(arquivos.map((arquivo) => arquivo.path));
   const listaAtual = arquivos
     .map((arquivo) => `===ARQUIVO: ${arquivo.path}===\n${arquivo.content}\n===FIM===`)
     .join('\n\n');
@@ -205,11 +233,10 @@ async function revisarArquivos(arquivos, language = 'pt') {
   for (const key of keys) {
     try {
       const texto = await chamarGemini(key, `${INSTRUCAO_REVISAO}\n\n${listaAtual}`);
-      const revisados = extrairArquivos(texto);
-      const caminhosRevisados = new Set(revisados.map((arquivo) => arquivo.path));
-      const manteveTodosOsArquivos = [...caminhosOriginais].every((caminho) => caminhosRevisados.has(caminho));
-      if (manteveTodosOsArquivos) return revisados;
-      console.warn('Autorrevisão descartada: a resposta não trouxe todos os arquivos originais. Mantendo o código sem revisão.');
+      if (texto.trim().toUpperCase().startsWith('OK')) return arquivos; // revisão não achou nada pra corrigir
+      const corrigidos = extrairArquivosDiff(texto);
+      if (!corrigidos.length) return arquivos; // resposta sem marcadores válidos: não arrisca, mantém original
+      return mesclarArquivos(arquivos, corrigidos);
       return arquivos;
     } catch (err) {
       console.warn('Erro na autorrevisão com uma das chaves, tentando a próxima...', err.message);
@@ -233,9 +260,13 @@ function errosConhecidosTexto() {
 
 async function chamarGemini(key, promptFinal) {
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash', generationConfig: { maxOutputTokens: 8192 } });
   const result = await model.generateContent(promptFinal);
   const response = await result.response;
+  const motivoParada = response.candidates?.[0]?.finishReason;
+  if (motivoParada === 'MAX_TOKENS') {
+    throw new Error('A resposta da IA foi cortada por ser grande demais (limite de tamanho atingido). Tente pedir algo um pouco mais simples, ou dividir o pedido em partes menores.');
+  }
   return response.text();
 }
 
@@ -243,7 +274,7 @@ async function chamarGemini(key, promptFinal) {
 // escreve (via onChunk), pra a pessoa ver o código sendo gerado em tempo real.
 async function chamarGeminiStream(key, promptFinal, onChunk = () => {}) {
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash' });
+  const model = genAI.getGenerativeModel({ model: 'gemini-3.6-flash', generationConfig: { maxOutputTokens: 8192 } });
   const resultado = await model.generateContentStream(promptFinal);
   let textoCompleto = '';
   for await (const pedaco of resultado.stream) {
@@ -252,6 +283,11 @@ async function chamarGeminiStream(key, promptFinal, onChunk = () => {}) {
       textoCompleto += texto;
       onChunk(texto);
     }
+  }
+  const respostaFinal = await resultado.response;
+  const motivoParada = respostaFinal.candidates?.[0]?.finishReason;
+  if (motivoParada === 'MAX_TOKENS') {
+    throw new Error('A resposta da IA foi cortada por ser grande demais (limite de tamanho atingido). Tente pedir algo um pouco mais simples, ou dividir o pedido em partes menores.');
   }
   return textoCompleto;
 }
@@ -326,8 +362,8 @@ async function refinarComGemini(htmlAtual, pedido, onStep = () => {}) {
 
 ${INSTRUCAO_CODIGO}
 
-Você está refinando um aplicativo React existente, já organizado em arquivos. Preserve tudo que já funciona e aplique somente as mudanças pedidas.
-Devolva a lista COMPLETA e atualizada de arquivos, no mesmo formato — inclusive os arquivos que não mudaram, sem omitir nenhum.
+Você está refinando um aplicativo React existente, já organizado em arquivos. Preserve tudo que já funciona.
+IMPORTANTE: devolva APENAS os arquivos que você criou ou precisou modificar pra atender o pedido — NÃO repita arquivos que não mudaram, omita-os completamente da resposta. Se o pedido só afeta um arquivo, devolva só esse arquivo.
 
 Pedido de refinamento: ${pedido}
 
@@ -338,9 +374,14 @@ ${listaAtual}${errosConhecidosTexto()}`;
   let ultimoErro = null;
   for (const key of keys) {
     try {
-      let files = extrairArquivos(await chamarGeminiStream(key, instrucao, (pedaco) => {
+      const textoBruto = await chamarGeminiStream(key, instrucao, (pedaco) => {
         onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
-      }));
+      });
+      const arquivosAlterados = extrairArquivosDiff(textoBruto);
+      if (!arquivosAlterados.length) {
+        throw new Error('A IA não devolveu nenhum arquivo alterado nessa tentativa.');
+      }
+      let files = mesclarArquivos(arquivosAtuais, arquivosAlterados);
 
       onStep({ stage: 'revisando', message: 'Revisando a alteração antes de entregar...' });
       files = await revisarArquivos(files, language);
@@ -477,7 +518,21 @@ function montarArquivosSandpack(arquivos, language = 'pt') {
 
   sandpackFiles['/package.json'] = {
     code: JSON.stringify({
+      name: 'meu-app-chequetto',
+      version: '0.1.0',
+      private: true,
       dependencies: { react: '18.2.0', 'react-dom': '18.2.0', 'react-scripts': '5.0.1' },
+      scripts: {
+        start: 'react-scripts start',
+        build: 'react-scripts build',
+        test: 'react-scripts test',
+        eject: 'react-scripts eject',
+      },
+      eslintConfig: { extends: ['react-app'] },
+      browserslist: {
+        production: ['>0.2%', 'not dead', 'not op_mini all'],
+        development: ['last 1 chrome version', 'last 1 firefox version', 'last 1 safari version'],
+      },
     }, null, 2),
   };
 

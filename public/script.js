@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     emptyState: document.getElementById('emptyState'),
     btnCopiar: document.getElementById('btnCopiar'),
     btnBaixar: document.getElementById('btnBaixar'),
+    btnBaixarZip: document.getElementById('btnBaixarZip'),
     btnPublicarGithub: document.getElementById('btnPublicarGithub'),
     btnSalvar: document.getElementById('btnSalvar'),
     refineInput: document.getElementById('refineInput'),
@@ -71,6 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.historyList) el.historyList.innerHTML = '';
     if (el.btnCopiar) el.btnCopiar.disabled = true;
     if (el.btnBaixar) el.btnBaixar.disabled = true;
+    if (el.btnBaixarZip) el.btnBaixarZip.disabled = true;
     if (el.btnPublicarGithub) el.btnPublicarGithub.disabled = true;
     if (el.btnSalvar) el.btnSalvar.disabled = true;
     renderAttachedFiles();
@@ -169,6 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el.emptyState) el.emptyState.hidden = true;
     if (el.btnCopiar) el.btnCopiar.disabled = false;
     if (el.btnBaixar) el.btnBaixar.disabled = false;
+    if (el.btnBaixarZip) el.btnBaixarZip.disabled = false;
     if (el.btnPublicarGithub) el.btnPublicarGithub.disabled = false;
     if (el.btnSalvar) el.btnSalvar.disabled = false;
     if (el.btnRefinar) el.btnRefinar.disabled = false;
@@ -731,6 +734,43 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (error) {
         el.btnSalvar.textContent = 'Erro ao salvar';
         setTimeout(() => { el.btnSalvar.textContent = original; el.btnSalvar.disabled = false; }, 1800);
+      }
+    });
+  }
+
+  if (el.btnBaixarZip) {
+    el.btnBaixarZip.addEventListener('click', async () => {
+      if (!state.filesAtual || state.filesAtual.length === 0) {
+        alert('Gere um aplicativo primeiro.');
+        return;
+      }
+      const original = el.btnBaixarZip.textContent;
+      el.btnBaixarZip.disabled = true;
+      el.btnBaixarZip.textContent = 'Preparando .zip...';
+      try {
+        const res = await fetch('/api/projects/download-zip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ files: state.filesAtual, nome: state.promptAtual || 'meu-app-chequetto' }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Falha ao gerar o zip');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'meu-app-chequetto.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        alert('Não foi possível baixar o projeto: ' + error.message);
+      } finally {
+        el.btnBaixarZip.disabled = false;
+        el.btnBaixarZip.textContent = original;
       }
     });
   }

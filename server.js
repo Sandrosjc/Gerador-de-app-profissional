@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
+const { ZipArchive } = require('archiver');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const XLSX = require('xlsx');
@@ -608,6 +609,51 @@ app.post('/api/github/publicar', async (req, res) => {
   } catch (error) {
     console.error('Erro ao publicar no GitHub:', error);
     res.status(500).json({ error: 'Erro ao publicar no GitHub.' });
+  }
+});
+
+// Baixa o projeto completo como .zip — um repositório de verdade (package.json,
+// src organizado, README), pronto pra "npm install && npm start" localmente.
+// Não depende de login nem do GitHub, ao contrário do botão de publicar.
+app.post('/api/projects/download-zip', (req, res) => {
+  const { files, lang, nome } = req.body || {};
+  try {
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'Nenhum arquivo pra baixar ainda.' });
+    }
+
+    const nomeLimpo = String(nome || 'meu-app-chequetto')
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 90) || 'meu-app-chequetto';
+
+    const arquivosFinais = montarArquivosSandpack(files, lang || 'pt');
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeLimpo}.zip"`);
+
+    const arquivoZip = new ZipArchive({ zlib: { level: 9 } });
+    arquivoZip.on('error', (err) => {
+      console.error('Erro ao montar o zip:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Erro ao montar o zip.' });
+    });
+    arquivoZip.pipe(res);
+
+    Object.entries(arquivosFinais).forEach(([caminho, obj]) => {
+      arquivoZip.append(obj.code, { name: caminho.replace(/^\//, '') });
+    });
+    arquivoZip.append(
+      `# ${nomeLimpo}\n\nGerado com [Chequetto/Oficina](https://gerador-de-app-profissional.onrender.com/).\n\nPra rodar localmente:\n\n\`\`\`\nnpm install\nnpm start\n\`\`\`\n`,
+      { name: 'README.md' }
+    );
+
+    arquivoZip.finalize();
+  } catch (error) {
+    console.error('Erro ao gerar zip do projeto:', error);
+    if (!res.headersSent) res.status(500).json({ error: 'Erro ao gerar o zip do projeto.' });
   }
 });
 

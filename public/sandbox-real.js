@@ -12,6 +12,15 @@ let carregando = false;
 let arquivosAtuais = [];
 let arquivoSelecionado = null;
 
+// Corre uma Promise contra um cronômetro — se estourar o tempo, rejeita com
+// uma mensagem clara em vez de deixar a pessoa olhando um símbolo girando pra sempre.
+function comLimiteDeTempo(promessa, ms, mensagemTimeout) {
+  return Promise.race([
+    promessa,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(mensagemTimeout)), ms)),
+  ]);
+}
+
 async function montarArquivosNoServidor(files) {
   const res = await fetch('/api/sandbox-files', {
     method: 'POST',
@@ -110,13 +119,21 @@ async function render(files) {
     const sandpackFiles = await montarArquivosNoServidor(files);
 
     if (!clientAtual) {
-      clientAtual = await loadSandpackClient(
-        frame,
-        { files: sandpackFiles, template: 'create-react-app' },
-        { showOpenInCodeSandbox: false, showErrorScreen: true, showLoadingScreen: true }
+      clientAtual = await comLimiteDeTempo(
+        loadSandpackClient(
+          frame,
+          { files: sandpackFiles, template: 'create-react-app' },
+          { showOpenInCodeSandbox: false, showErrorScreen: true, showLoadingScreen: true }
+        ),
+        20000,
+        'O sandbox real demorou demais pra carregar (mais de 20 segundos) e foi cancelado.'
       );
     } else {
-      await clientAtual.updateSandbox({ files: sandpackFiles, template: 'create-react-app' });
+      await comLimiteDeTempo(
+        clientAtual.updateSandbox({ files: sandpackFiles, template: 'create-react-app' }),
+        20000,
+        'O sandbox real demorou demais pra atualizar (mais de 20 segundos) e foi cancelado.'
+      );
     }
 
     montarListaDeArquivos();
