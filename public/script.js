@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const WORKSPACE_STORAGE_KEY = 'chequetto_workspace_state_v1';
+  const WORKSPACE_STORAGE_KEY = 'chequetto_workspace_state_v2'; // v2: o v1 guardava HTML no formato antigo (multi-arquivo), incompatível com o motor atual — subir a versão descarta sessões antigas automaticamente
   const SAVED_PROJECTS_STORAGE_KEY = 'chequetto_saved_projects_v1';
   const el = {
     prompt: document.getElementById('prompt'),
@@ -83,6 +83,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       localStorage.setItem(storageKey(WORKSPACE_STORAGE_KEY), JSON.stringify({
         codigoAtual: state.codigoAtual,
+        filesAtual: state.filesAtual,
         promptAtual: state.promptAtual,
         promptDraft: el.prompt?.value || state.promptDraft,
         planoAtual: state.planoAtual,
@@ -108,9 +109,17 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey(WORKSPACE_STORAGE_KEY)) || 'null');
       if (!saved) return;
+      // Proteção extra: se por algum motivo um HTML do formato antigo (multi-arquivo,
+      // com data-arquivo=) chegar aqui, descarta em vez de restaurar algo incompatível.
+      if (saved.codigoAtual && String(saved.codigoAtual).includes('data-arquivo=')) {
+        console.warn('Workspace salvo estava no formato antigo (pré-atualização) — descartando.');
+        localStorage.removeItem(storageKey(WORKSPACE_STORAGE_KEY));
+        return;
+      }
       state = {
         ...state,
         ...saved,
+        filesAtual: Array.isArray(saved.filesAtual) ? saved.filesAtual : [],
         historico: Array.isArray(saved.historico) ? saved.historico : [],
         planoAtual: Array.isArray(saved.planoAtual) ? saved.planoAtual : [],
       };
