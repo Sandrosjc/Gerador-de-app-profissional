@@ -10,6 +10,13 @@ const { registrarErro, listarErrosRecentes } = require('./db');
 // ambiente no Render, sem precisar mexer em código nem esperar um novo deploy.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
+// Limite de tokens de saída, também configurável. O valor anterior (8192)
+// era baixo demais pra apps reais (com CSS, JS, várias telas/modais) — apps
+// com bastante funcionalidade batiam no teto, a resposta vinha cortada, e
+// ISSO SOZINHO já contava como falha (a chave é descartada e tenta a
+// próxima, repetindo o problema em todas). 32768 dá bem mais fôlego.
+const GEMINI_MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS) || 32768;
+
 // Palavras que indicam que um pedido de refino é "corrigir um erro" (e não
 // só adicionar uma funcionalidade nova) — usado pra alimentar a memória de erros.
 const PALAVRAS_DE_ERRO = ['erro', 'bug', 'não funciona', 'nao funciona', 'quebrou', 'quebrado', 'não abre', 'nao abre', 'corrig', 'consert', 'falha', 'travou', 'trava '];
@@ -145,7 +152,7 @@ function errosConhecidosTexto() {
 
 async function chamarGemini(key, promptFinal) {
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { maxOutputTokens: 8192 } });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS } });
   const result = await model.generateContent(promptFinal);
   const response = await result.response;
   const motivoParada = response.candidates?.[0]?.finishReason;
@@ -159,7 +166,7 @@ async function chamarGemini(key, promptFinal) {
 // escreve (via onChunk), pra a pessoa ver o código sendo gerado em tempo real.
 async function chamarGeminiStream(key, promptFinal, onChunk = () => {}) {
   const genAI = new GoogleGenerativeAI(key);
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { maxOutputTokens: 8192 } });
+  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL, generationConfig: { maxOutputTokens: GEMINI_MAX_OUTPUT_TOKENS } });
   const resultado = await model.generateContentStream(promptFinal);
   let textoCompleto = '';
   for await (const pedaco of resultado.stream) {
@@ -227,9 +234,13 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
   onStep({ stage: 'planejando', message: 'Plano pronto', plano });
 
   // ETAPA 2: gerar o HTML de verdade
-  onStep({ stage: 'criando', message: 'Escrevendo o código do aplicativo...' });
   for (const key of keys) {
     try {
+      // Emite 'criando' a CADA tentativa (não só uma vez antes do loop) — o
+      // front-end limpa a caixinha de código nesse sinal; sem isso, se uma
+      // chave falhar no meio e a próxima for tentada, o texto da tentativa
+      // anterior ficava acumulado visualmente junto com o da nova tentativa.
+      onStep({ stage: 'criando', message: 'Escrevendo o código do aplicativo...' });
       const promptFinal = `${INSTRUCAO_GLOBAL}\n\nIdioma obrigatório do aplicativo e dos textos: ${language}.\n${INSTRUCAO_CODIGO}\n\nPedido do usuário: ${prompt}\n\nPlano a seguir:\n${plano.join('\n')}${errosConhecidosTexto()}`;
       const textoBruto = await chamarGeminiStream(key, promptFinal, (pedaco) => {
         onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
@@ -273,10 +284,10 @@ Pedido de refinamento: ${pedido}
 Código atual:
 ${htmlAtual}${errosConhecidosTexto()}`;
 
-  onStep({ stage: 'refinando', message: 'Aplicando as alterações no aplicativo...' });
   let ultimoErro = null;
   for (const key of keys) {
     try {
+      onStep({ stage: 'refinando', message: 'Aplicando as alterações no aplicativo...' });
       const textoBruto = await chamarGeminiStream(key, instrucao, (pedaco) => {
         onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
       });
