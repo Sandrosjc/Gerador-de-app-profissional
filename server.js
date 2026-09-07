@@ -450,6 +450,16 @@ app.get('/generate/stream', async (req, res) => {
 
   const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
 
+  // Mantém a conexão SSE viva durante trechos "silenciosos" (ex: entre uma
+  // chave falhar e a próxima começar a tentar) — sem isso, proxies com
+  // timeout de inatividade (comum no Render e afins) derrubam a conexão
+  // antes do servidor conseguir mandar a mensagem de erro de verdade, e o
+  // navegador só mostra "Erro de conexão" genérico, escondendo a causa real.
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch (err) { /* conexão já fechada, ignora */ }
+  }, 15000);
+  req.on('close', () => clearInterval(heartbeat));
+
   try {
     deductAnonCredit(ip);
 
@@ -459,6 +469,7 @@ app.get('/generate/stream', async (req, res) => {
     console.error('Erro na geração:', error);
     send({ stage: 'erro', message: error.message || 'Erro ao processar requisição com IA' });
   } finally {
+    clearInterval(heartbeat);
     res.end();
   }
 });

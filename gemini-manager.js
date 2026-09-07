@@ -26,6 +26,22 @@ function pareceCorrecaoDeErro(pedido) {
   return PALAVRAS_DE_ERRO.some((palavra) => texto.includes(palavra));
 }
 
+// Descobre se o "último erro" ao esgotar todas as chaves foi por cota
+// estourada (429/403) — isso muda completamente a mensagem que a pessoa
+// precisa ver: não é um bug, é "espere um pouco ou use mais chaves".
+function ehErroDeCota(err) {
+  const status = err?.status;
+  const texto = String(err?.message || '').toLowerCase();
+  return status === 429 || status === 403 || texto.includes('quota') || texto.includes('rate limit') || texto.includes('429');
+}
+
+function mensagemErroFinal(ultimoErro, totalChaves) {
+  if (ultimoErro && ehErroDeCota(ultimoErro)) {
+    return `As ${totalChaves} chave${totalChaves > 1 ? 's' : ''} de API configurada${totalChaves > 1 ? 's' : ''} atingiram o limite de uso gratuito no momento (não é um erro no app). Espere alguns minutos e tente de novo, ou adicione mais chaves em GEMINI_API_KEYS.`;
+  }
+  return 'Todas as chaves de API falharam ao processar a requisição. Último erro: ' + (ultimoErro ? ultimoErro.message : 'desconhecido');
+}
+
 function getApiKeys() {
   const keys = (process.env.GEMINI_API_KEYS || '')
     .split(',')
@@ -260,10 +276,7 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
   }
 
   onStep({ stage: 'erro', message: 'Não foi possível gerar o aplicativo.' });
-  throw new Error(
-    'Todas as chaves de API falharam ao processar a requisição. Último erro: ' +
-    (ultimoErro ? ultimoErro.message : 'desconhecido')
-  );
+  throw new Error(mensagemErroFinal(ultimoErro, keys.length));
 }
 
 async function refinarComGemini(htmlAtual, pedido, onStep = () => {}) {
@@ -312,7 +325,7 @@ ${htmlAtual}${errosConhecidosTexto()}`;
       console.warn('Erro no refinamento com uma das chaves, tentando a próxima...', err.message);
     }
   }
-  throw new Error('Não foi possível aplicar o refinamento. Último erro: ' + (ultimoErro?.message || 'desconhecido'));
+  throw new Error(mensagemErroFinal(ultimoErro, keys.length));
 }
 
 const INSTRUCAO_DISCUSSAO = `Você é um consultor técnico e de produto do Oficina, uma plataforma que gera mini-aplicativos web com IA.
