@@ -86,9 +86,35 @@
     </div>
     <div class="bench__footer">
       Oficina v1.0
-      <div style="margin-top: 8px;">
-        <img src="https://api.visitorbadge.io/api/visitors?path=gerador-de-app-profissional.onrender.com" alt="Contador de Visitas">
+      <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap;">
+        <!-- Visitas Totais -->
+        <img src="https://api.visitorbadge.io/api/visitors?path=gerador-de-app-profissional.onrender.com-total&label=VISITAS&labelColor=%231e293b&countColor=%232563eb" alt="Visitas Totais">
+        <!-- Visitantes Únicos -->
+        <span id="uniqueBadgeContainer" style="display: inline-flex; align-items: center;"></span>
       </div>
+      <script>
+        (function() {
+          var container = document.getElementById('uniqueBadgeContainer');
+          if (!container) return;
+          var cachedSvg = localStorage.getItem('chequetto_unique_svg');
+          if (cachedSvg) {
+            container.innerHTML = cachedSvg;
+          } else {
+            var url = "https://api.visitorbadge.io/api/visitors?path=gerador-de-app-profissional.onrender.com-uniques&label=%C3%9ANICOS&labelColor=%231e293b&countColor=%2310b981";
+            fetch(url)
+              .then(function(r) { return r.text(); })
+              .then(function(svg) {
+                if (svg && svg.indexOf('<svg') !== -1) {
+                  localStorage.setItem('chequetto_unique_svg', svg);
+                  container.innerHTML = svg;
+                }
+              })
+              .catch(function() {
+                container.innerHTML = '<img src="' + url + '" alt="Únicos">';
+              });
+          }
+        })();
+      </script>
     </div>
   </aside>
   <!-- ===================== PALCO / PREVIEW ===================== -->
