@@ -547,6 +547,10 @@ document.addEventListener('DOMContentLoaded', () => {
           if (el.status) el.status.textContent = data.message;
           if (bubbleConstrucao) bubbleConstrucao.textContent = 'Revisando o código antes de te entregar...';
         }
+        if (data.stage === 'aguardando_cota') {
+          if (el.status) el.status.textContent = data.message;
+          if (bubbleConstrucao) bubbleConstrucao.textContent = '⏳ ' + data.message;
+        }
         if (data.stage === 'planejando' && !data.plano) {
           if (el.status) el.status.textContent = data.message;
         }
@@ -874,19 +878,127 @@ document.addEventListener('DOMContentLoaded', () => {
   if (el.tabs) {
     el.tabs.forEach(tab => {
       tab.addEventListener('click', () => {
+        const view = tab.getAttribute('data-view');
+        if (view === 'sandbox') {
+          abrirIdeTelaCheia();
+          return; // não mexe nas outras abas — o overlay é independente delas
+        }
         el.tabs.forEach(t => t.classList.remove('is-active'));
         tab.classList.add('is-active');
-        const view = tab.getAttribute('data-view');
         if (el.previewFrame) el.previewFrame.hidden = view !== 'preview';
         if (el.codeView) el.codeView.hidden = view !== 'code';
-        const sandboxView = document.getElementById('sandboxView');
-        if (sandboxView) sandboxView.hidden = view !== 'sandbox';
-        if (view === 'sandbox') {
-          window.chequettoSandbox?.render(state.filesAtual || []);
-        }
       });
     });
   }
+
+  function abrirIdeTelaCheia() {
+    const overlay = document.getElementById('ideOverlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    window.chequettoSandbox?.render(state.filesAtual || []);
+  }
+
+  document.getElementById('btnFecharIde')?.addEventListener('click', () => {
+    const overlay = document.getElementById('ideOverlay');
+    if (overlay) overlay.hidden = true;
+  });
+
+  // EventSource não suporta POST, então pra streaming via POST (usado no
+  // refino do editor profissional, que precisa mandar o HTML atual — grande
+  // demais pra caber numa URL de GET) lemos o corpo da resposta manualmente,
+  // pedaço por pedaço, e interpretamos como eventos SSE (mesmo formato do
+  // EventSource, "data: {...}\n\n").
+  async function postComStreaming(url, corpo, onEvento) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(corpo),
+    });
+    if (!res.ok || !res.body) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Falha na requisição');
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const partes = buffer.split('\n\n');
+      buffer = partes.pop() || '';
+      for (const parte of partes) {
+        const linhaDados = parte.split('\n').find((l) => l.startsWith('data: '));
+        if (linhaDados) {
+          try { onEvento(JSON.parse(linhaDados.slice(6))); } catch (e) { /* pedaço incompleto, ignora */ }
+        }
+      }
+    }
+  }
+
+  function adicionarMensagemIdeChat(autor, texto) {
+    const log = document.getElementById('ideChatLog');
+    if (!log) return null;
+    const bolha = document.createElement('div');
+    bolha.className = 'ide-chat__msg ide-chat__msg--' + (autor === 'user' ? 'user' : 'ai');
+    bolha.textContent = texto;
+    log.appendChild(bolha);
+    log.scrollTop = log.scrollHeight;
+    return bolha;
+  }
+
+  document.getElementById('btnIdeAiEnviar')?.addEventListener('click', async () => {
+    const input = document.getElementById('ideAiInput');
+    const botao = document.getElementById('btnIdeAiEnviar');
+    const pedido = input?.value.trim();
+    if (!pedido) return;
+
+    if (!state.codigoAtual) {
+      adicionarMensagemIdeChat('user', pedido);
+      adicionarMensagemIdeChat('ai', 'Gere um aplicativo primeiro (no gerador principal) antes de pedir alterações aqui.');
+      input.value = '';
+      return;
+    }
+
+    adicionarMensagemIdeChat('user', pedido);
+    input.value = '';
+    botao.disabled = true;
+    const bolhaResposta = adicionarMensagemIdeChat('ai', 'Entendendo o pedido...');
+
+    try {
+      await postComStreaming('/refine/stream', { html: state.codigoAtual, pedido }, (evento) => {
+        if (evento.stage === 'refinando' && bolhaResposta) {
+          bolhaResposta.textContent = evento.message || 'Aplicando a alteração...';
+        }
+        if (evento.stage === 'revisando' && bolhaResposta) {
+          bolhaResposta.textContent = evento.message || 'Revisando antes de entregar...';
+        }
+        if (evento.stage === 'aguardando_cota' && bolhaResposta) {
+          bolhaResposta.textContent = '⏳ ' + evento.message;
+        }
+        if (evento.stage === 'erro') {
+          throw new Error(evento.message || 'Erro ao aplicar a alteração');
+        }
+        if (evento.stage === 'salvo_temp') {
+          showGeneratedCode(evento.code, state.promptAtual);
+          state.filesAtual = evento.files || [];
+          state.historico.push({ prompt: 'Ajuste (editor profissional): ' + pedido, code: evento.code, plano: state.planoAtual });
+          renderHistory();
+          persistWorkspace();
+          if (bolhaResposta) bolhaResposta.textContent = 'Pronto! Já apliquei essa alteração — o código e o preview foram atualizados.';
+          window.chequettoSandbox?.render(state.filesAtual);
+        }
+      });
+    } catch (error) {
+      if (bolhaResposta) bolhaResposta.textContent = 'Não consegui aplicar: ' + error.message;
+    } finally {
+      botao.disabled = false;
+    }
+  });
+
+  document.getElementById('ideAiInput')?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') document.getElementById('btnIdeAiEnviar')?.click();
+  });
 
   if (el.devices) {
     el.devices.forEach(dev => {

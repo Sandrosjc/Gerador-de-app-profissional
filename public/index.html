@@ -116,17 +116,6 @@
       <div class="frame-wrap" id="frameWrap">
         <iframe id="previewFrame" hidden></iframe>
         <pre class="code-view" id="codeView" hidden><code id="codeViewText"></code></pre>
-        <div class="sandbox-view" id="sandboxView" hidden>
-          <p class="sandbox-view__hint" id="sandboxHint">Clique em "Sandbox real" depois de gerar um app pra ver ele rodando num bundler de verdade (Vite/Webpack, como no Lovable) — em vez do preview rápido padrão.</p>
-          <div class="sandbox-view__body" id="sandboxBody" hidden>
-            <iframe id="sandboxFrame" title="Sandbox real"></iframe>
-            <div class="sandbox-editor" id="sandboxEditor">
-              <div class="sandbox-editor__files" id="sandboxEditorFiles"></div>
-              <textarea class="sandbox-editor__textarea" id="sandboxEditorTextarea" spellcheck="false"></textarea>
-              <button class="btn-secondary" id="btnAplicarEdicaoSandbox" type="button">Aplicar alteração no sandbox</button>
-            </div>
-          </div>
-        </div>
       </div>
       <div class="empty-state" id="emptyState">
         <div class="conversion-carousel" aria-live="polite">
@@ -153,6 +142,28 @@
 </div>
 
 <!-- ===================== JANELA DE PLANOS ===================== -->
+<div class="ide-overlay" id="ideOverlay" hidden>
+  <div class="ide-overlay__header">
+    <span class="ide-overlay__title">🧪 Sandbox real — Editor profissional</span>
+    <button class="ide-overlay__close" id="btnFecharIde" type="button">← Voltar pro gerador</button>
+  </div>
+  <p class="sandbox-view__hint" id="sandboxHint">Clique em "Sandbox real" depois de gerar um app pra ver ele rodando num bundler de verdade (Vite/Webpack, como no Lovable) — em vez do preview rápido padrão.</p>
+  <div class="ide-overlay__body" id="sandboxBody" hidden>
+    <div class="ide-sidebar" id="sandboxEditorFiles"></div>
+    <div class="ide-main">
+      <textarea class="sandbox-editor__textarea" id="sandboxEditorTextarea" spellcheck="false"></textarea>
+      <button class="btn-secondary" id="btnAplicarEdicaoSandbox" type="button">Aplicar alteração no sandbox</button>
+    </div>
+    <iframe id="sandboxFrame" title="Sandbox real"></iframe>
+  </div>
+  <div class="ide-chat" id="ideChat">
+    <div class="ide-chat__log" id="ideChatLog"></div>
+    <div class="ide-chat__input-row">
+      <input type="text" id="ideAiInput" placeholder="Converse com a IA sobre o projeto (modo planejamento)..." />
+      <button class="btn-primary" id="btnIdeAiEnviar" type="button">Enviar</button>
+    </div>
+  </div>
+</div>
 <div class="modal-overlay" id="authModalOverlay" hidden>
   <div class="auth-modal" id="authModal">
     <button class="auth-modal__close" id="closeAuthModal">×</button>

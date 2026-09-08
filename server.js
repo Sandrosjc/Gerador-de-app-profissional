@@ -509,6 +509,37 @@ app.post('/refine', async (req, res) => {
   }
 });
 
+// Igual a /refine, mas com streaming (SSE via POST) — usado pelo chat do
+// editor profissional, pra a pessoa ver a IA narrando o que está fazendo em
+// tempo real (aplicando, revisando, pronto), em vez de uma resposta estática
+// que só aparece no final.
+app.post('/refine/stream', async (req, res) => {
+  const { html, pedido } = req.body || {};
+  if (!html || !pedido) return res.status(400).json({ error: 'Aplicativo e pedido de alteração são obrigatórios' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n'); } catch (err) { /* conexão já fechada, ignora */ }
+  }, 15000);
+  req.on('close', () => clearInterval(heartbeat));
+
+  try {
+    const { html: codigo, files } = await refinarComGemini(html, pedido, (step) => send(step));
+    send({ stage: 'salvo_temp', code: codigo, files });
+  } catch (error) {
+    console.error('Erro no refinamento (stream):', error);
+    send({ stage: 'erro', message: error.message || 'Erro ao aplicar alteração' });
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
+});
+
 // ---------- Modo Planejamento: conversa livre, não consome crédito, não gera código ----------
 
 app.post('/api/chat/discutir', async (req, res) => {

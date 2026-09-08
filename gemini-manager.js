@@ -17,6 +17,13 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 // próxima, repetindo o problema em todas). 32768 dá bem mais fôlego.
 const GEMINI_MAX_OUTPUT_TOKENS = Number(process.env.GEMINI_MAX_OUTPUT_TOKENS) || 32768;
 
+// Se TODAS as chaves esgotarem por cota (429), espera e tenta o ciclo de
+// chaves de novo, em vez de desistir na hora — cotas por minuto costumam
+// resetar rápido. Não adianta esperar se o erro não for de cota (aí é um
+// problema de verdade, esperar não resolve).
+const GEMINI_ESPERA_COTA_MS = Number(process.env.GEMINI_ESPERA_COTA_MS) || 65000;
+const GEMINI_RODADAS_EXTRAS_COTA = Number(process.env.GEMINI_RODADAS_EXTRAS_COTA) || 2;
+
 // Palavras que indicam que um pedido de refino é "corrigir um erro" (e não
 // só adicionar uma funcionalidade nova) — usado pra alimentar a memória de erros.
 const PALAVRAS_DE_ERRO = ['erro', 'bug', 'não funciona', 'nao funciona', 'quebrou', 'quebrado', 'não abre', 'nao abre', 'corrig', 'consert', 'falha', 'travou', 'trava '];
@@ -40,6 +47,38 @@ function mensagemErroFinal(ultimoErro, totalChaves) {
     return `As ${totalChaves} chave${totalChaves > 1 ? 's' : ''} de API configurada${totalChaves > 1 ? 's' : ''} atingiram o limite de uso gratuito no momento (não é um erro no app). Espere alguns minutos e tente de novo, ou adicione mais chaves em GEMINI_API_KEYS.`;
   }
   return 'Todas as chaves de API falharam ao processar a requisição. Último erro: ' + (ultimoErro ? ultimoErro.message : 'desconhecido');
+}
+
+// Percorre todas as chaves tentando `tentarComChave(key)`. Se TODAS falharem
+// por cota estourada (429), espera GEMINI_ESPERA_COTA_MS e repete o ciclo
+// inteiro, até GEMINI_RODADAS_EXTRAS_COTA vezes extras. Se o erro não for de
+// cota, desiste na hora (esperar não ia resolver um bug de verdade).
+// `onTentativa(key)` é chamado antes de cada tentativa individual, e
+// `onEsperando(segundos)` quando entra em espera entre rodadas.
+async function tentarComTodasAsChaves(keys, tentarComChave, onTentativa = () => {}, onEsperando = () => {}) {
+  let ultimoErro = null;
+
+  for (let rodada = 0; rodada <= GEMINI_RODADAS_EXTRAS_COTA; rodada++) {
+    for (const key of keys) {
+      try {
+        onTentativa(key);
+        return await tentarComChave(key);
+      } catch (err) {
+        ultimoErro = err;
+        console.warn('Falhou com uma chave, tentando a próxima...', err.message);
+      }
+    }
+
+    const aindaTemRodadaSobrando = rodada < GEMINI_RODADAS_EXTRAS_COTA;
+    if (aindaTemRodadaSobrando && ultimoErro && ehErroDeCota(ultimoErro)) {
+      onEsperando(Math.round(GEMINI_ESPERA_COTA_MS / 1000));
+      await new Promise((resolve) => setTimeout(resolve, GEMINI_ESPERA_COTA_MS));
+    } else {
+      break;
+    }
+  }
+
+  throw ultimoErro || new Error('Nenhuma chave de API disponível.');
 }
 
 function getApiKeys() {
@@ -250,29 +289,36 @@ async function gerarComGemini(prompt, history = [], onStep = () => {}, language 
   onStep({ stage: 'planejando', message: 'Plano pronto', plano });
 
   // ETAPA 2: gerar o HTML de verdade
-  for (const key of keys) {
-    try {
-      // Emite 'criando' a CADA tentativa (não só uma vez antes do loop) — o
-      // front-end limpa a caixinha de código nesse sinal; sem isso, se uma
-      // chave falhar no meio e a próxima for tentada, o texto da tentativa
-      // anterior ficava acumulado visualmente junto com o da nova tentativa.
-      onStep({ stage: 'criando', message: 'Escrevendo o código do aplicativo...' });
-      const promptFinal = `${INSTRUCAO_GLOBAL}\n\nIdioma obrigatório do aplicativo e dos textos: ${language}.\n${INSTRUCAO_CODIGO}\n\nPedido do usuário: ${prompt}\n\nPlano a seguir:\n${plano.join('\n')}${errosConhecidosTexto()}`;
-      const textoBruto = await chamarGeminiStream(key, promptFinal, (pedaco) => {
-        onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
-      });
-      let html = extrairHtml(textoBruto);
+  try {
+    const resultado = await tentarComTodasAsChaves(
+      keys,
+      async (key) => {
+        const promptFinal = `${INSTRUCAO_GLOBAL}\n\nIdioma obrigatório do aplicativo e dos textos: ${language}.\n${INSTRUCAO_CODIGO}\n\nPedido do usuário: ${prompt}\n\nPlano a seguir:\n${plano.join('\n')}${errosConhecidosTexto()}`;
+        const textoBruto = await chamarGeminiStream(key, promptFinal, (pedaco) => {
+          onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
+        });
+        let html = extrairHtml(textoBruto);
 
-      onStep({ stage: 'revisando', message: 'Revisando o código antes de entregar...' });
-      html = await revisarHtml(html, language);
-
-      const files = [{ path: 'index.html', content: html }];
-      onStep({ stage: 'concluido', message: 'Aplicativo pronto!' });
-      return { html, files, plano };
-    } catch (err) {
-      console.warn('Erro na geração com uma das chaves, tentando a próxima...', err.message);
-      ultimoErro = err;
-    }
+        onStep({ stage: 'revisando', message: 'Revisando o código antes de entregar...' });
+        html = await revisarHtml(html, language);
+        return html;
+      },
+      () => {
+        // Emite 'criando' a CADA tentativa (não só uma vez) — o front-end
+        // limpa a caixinha de código nesse sinal; sem isso, se uma chave
+        // falhasse no meio, o texto da tentativa anterior ficava acumulado
+        // visualmente junto com o da nova tentativa.
+        onStep({ stage: 'criando', message: 'Escrevendo o código do aplicativo...' });
+      },
+      (segundos) => {
+        onStep({ stage: 'aguardando_cota', message: `Todas as chaves atingiram o limite de uso no momento. Aguardando ${segundos}s pra tentar de novo...`, segundos });
+      }
+    );
+    const files = [{ path: 'index.html', content: resultado }];
+    onStep({ stage: 'concluido', message: 'Aplicativo pronto!' });
+    return { html: resultado, files, plano };
+  } catch (err) {
+    ultimoErro = err;
   }
 
   onStep({ stage: 'erro', message: 'Não foi possível gerar o aplicativo.' });
@@ -297,35 +343,41 @@ Pedido de refinamento: ${pedido}
 Código atual:
 ${htmlAtual}${errosConhecidosTexto()}`;
 
-  let ultimoErro = null;
-  for (const key of keys) {
-    try {
-      onStep({ stage: 'refinando', message: 'Aplicando as alterações no aplicativo...' });
-      const textoBruto = await chamarGeminiStream(key, instrucao, (pedaco) => {
-        onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
-      });
-      let html = extrairHtml(textoBruto);
+  try {
+    const resultado = await tentarComTodasAsChaves(
+      keys,
+      async (key) => {
+        const textoBruto = await chamarGeminiStream(key, instrucao, (pedaco) => {
+          onStep({ stage: 'escrevendo_ao_vivo', chunk: pedaco });
+        });
+        let html = extrairHtml(textoBruto);
 
-      onStep({ stage: 'revisando', message: 'Revisando a alteração antes de entregar...' });
-      html = await revisarHtml(html, language);
-
-      if (pareceCorrecaoDeErro(pedido)) {
-        try {
-          registrarErro({ pedido, resumoErro: pedido, resumoSolucao: 'Corrigido via refino (revisão automática aplicada).' });
-        } catch (err) {
-          console.warn('Não foi possível registrar na memória de erros (não bloqueia o refino):', err.message);
-        }
+        onStep({ stage: 'revisando', message: 'Revisando a alteração antes de entregar...' });
+        html = await revisarHtml(html, language);
+        return html;
+      },
+      () => {
+        onStep({ stage: 'refinando', message: 'Aplicando as alterações no aplicativo...' });
+      },
+      (segundos) => {
+        onStep({ stage: 'aguardando_cota', message: `Todas as chaves atingiram o limite de uso no momento. Aguardando ${segundos}s pra tentar de novo...`, segundos });
       }
+    );
 
-      const files = [{ path: 'index.html', content: html }];
-      onStep({ stage: 'concluido', message: 'Alteração aplicada!' });
-      return { html, files };
-    } catch (err) {
-      ultimoErro = err;
-      console.warn('Erro no refinamento com uma das chaves, tentando a próxima...', err.message);
+    if (pareceCorrecaoDeErro(pedido)) {
+      try {
+        registrarErro({ pedido, resumoErro: pedido, resumoSolucao: 'Corrigido via refino (revisão automática aplicada).' });
+      } catch (err) {
+        console.warn('Não foi possível registrar na memória de erros (não bloqueia o refino):', err.message);
+      }
     }
+
+    const files = [{ path: 'index.html', content: resultado }];
+    onStep({ stage: 'concluido', message: 'Alteração aplicada!' });
+    return { html: resultado, files };
+  } catch (err) {
+    throw new Error(mensagemErroFinal(err, keys.length));
   }
-  throw new Error(mensagemErroFinal(ultimoErro, keys.length));
 }
 
 const INSTRUCAO_DISCUSSAO = `Você é um consultor técnico e de produto do Oficina, uma plataforma que gera mini-aplicativos web com IA.
