@@ -567,7 +567,6 @@ document.addEventListener('DOMContentLoaded', () => {
           setStage('criando');
           if (el.status) el.status.textContent = data.message;
           if (el.codeViewText) el.codeViewText.textContent = '';
-          document.querySelector('.tab[data-view="code"]')?.click();
         }
         if (data.stage === 'escrevendo_ao_vivo' && data.chunk) {
           if (el.codeViewText) {
