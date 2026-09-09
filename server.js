@@ -31,6 +31,8 @@ const {
   markEmailVerified,
   getAnonCredits,
   deductAnonCredit,
+  registrarVisita,
+  contarVisitas,
 } = require('./db');
 const { signUserToken, requireAuth } = require('./auth');
 const plans = require('./plans.json');
@@ -100,6 +102,25 @@ function tryGetUser(req) {
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', keysLoaded: keys.length });
+});
+
+// Contador de visitas: geral (toda vez que a página carrega) e único (por IP).
+app.post('/api/visita/registrar', (req, res) => {
+  try {
+    registrarVisita(clientIp(req));
+    res.json(contarVisitas());
+  } catch (error) {
+    console.error('Erro ao registrar visita:', error);
+    res.status(500).json({ error: 'Erro ao registrar visita' });
+  }
+});
+
+app.get('/api/visita/contadores', (req, res) => {
+  try {
+    res.json(contarVisitas());
+  } catch (error) {
+    res.status(500).json({ error: 'Erro ao consultar contadores' });
+  }
 });
 
 app.get('/api/credits', (req, res) => {

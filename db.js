@@ -44,6 +44,14 @@ CREATE TABLE IF NOT EXISTS anon_credits (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Contador de visitas: cada carregamento de página vira uma linha aqui.
+-- Contagem geral = total de linhas. Contagem de únicos = IPs distintos.
+CREATE TABLE IF NOT EXISTS visitas (
+  id TEXT PRIMARY KEY,
+  ip TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS error_history (
   id TEXT PRIMARY KEY,
   pedido TEXT NOT NULL,
@@ -301,6 +309,18 @@ function deductAnonCredit(ip) {
   return getAnonCredits(ip);
 }
 
+// ---------- Contador de visitas (geral + únicos) ----------
+
+function registrarVisita(ip) {
+  db.prepare('INSERT INTO visitas (id, ip) VALUES (?, ?)').run(newId(), ip || 'desconhecido');
+}
+
+function contarVisitas() {
+  const total = db.prepare('SELECT COUNT(*) as c FROM visitas').get().c;
+  const unicos = db.prepare('SELECT COUNT(DISTINCT ip) as c FROM visitas').get().c;
+  return { total, unicos };
+}
+
 // ---------- Memória de erros já corrigidos (pra IA não repetir) ----------
 
 function registrarErro({ pedido, resumoErro, resumoSolucao }) {
@@ -340,4 +360,6 @@ module.exports = {
   deductAnonCredit,
   registrarErro,
   listarErrosRecentes,
+  registrarVisita,
+  contarVisitas,
 };

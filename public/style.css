@@ -211,6 +211,20 @@ body{
   font-size:11px;
   color:var(--text-dim);
 }
+.visit-counter{
+  position:fixed;
+  left:12px;
+  bottom:12px;
+  z-index:500;
+  background:var(--ink-2);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:6px 12px;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--text-dim);
+  box-shadow:0 2px 8px rgba(0,0,0,.08);
+}
 
 /* ===================== PALCO / PREVIEW ===================== */
 .stage{
@@ -471,20 +485,20 @@ body{
   .conversion-carousel .empty-state__sub{font-size:14px;}
 }
 
-/* Direcao visual 2026: estudio claro, tipografia forte e acentos vivos. */
+/* Direcao visual 2026: neutros quentes e acolhedores, sem branco/preto puros. */
 :root{
-  --ink:#101827;
-  --ink-2:#f7f8fb;
-  --ink-3:#e9edf5;
-  --line:#d8deea;
-  --paper:#ffffff;
-  --brass:#c7f36b;
-  --brass-soft:#6f8f2b;
-  --ember:#ff6b57;
-  --text:#162033;
-  --text-dim:#68738a;
-  --ok:#2e9b72;
-  --err:#c84b4b;
+  --ink:#2B2D31;
+  --ink-2:#F8F7F4;
+  --ink-3:#EFECE6;
+  --line:#E1DDD5;
+  --paper:#F8F7F4;
+  --brass:#B85B3A;
+  --brass-soft:#8f4429;
+  --ember:#3B7A9E;
+  --text:#2B2D31;
+  --text-dim:#8f8a80;
+  --ok:#4A7C59;
+  --err:#B85B3A;
   --radius:6px;
   --sans:'Space Grotesk','Avenir Next',sans-serif;
   --display:'Space Grotesk','Avenir Next',sans-serif;
@@ -492,7 +506,7 @@ body{
 }
 
 body{
-  background:#eef1f6;
+  background:#F8F7F4;
   color:var(--text);
 }
 .shell{grid-template-columns:370px 1fr;}
@@ -1186,7 +1200,9 @@ body{background:#eef1f6;color:#162033;}
 .account-chip__avatar{border-radius:50%;object-fit:cover;}
 .account-chip__name{max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:700 12px var(--sans);color:var(--text);}
 
-/* ===================== Sandbox real (bundler de verdade) ===================== */
+/* ===================== Monaco Editor (modo "Abrir com VS Code") ===================== */
+.monaco-container{width:100%;height:100%;background:#F4F3EF;}
+
 .ide-overlay{position:fixed;inset:0;z-index:9999;background:#0d1117;display:flex;flex-direction:column;}
 .ide-overlay__header{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:#161b22;border-bottom:1px solid rgba(255,255,255,.1);}
 .ide-overlay__title{color:#e6edf3;font:700 14px var(--sans);}

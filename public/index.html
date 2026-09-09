@@ -84,39 +84,9 @@
       <p class="history__label">Histórico</p>
       <ul class="history__list" id="historyList"></ul>
     </div>
-    <div class="bench__footer">
-      Oficina v1.0
-      <div style="margin-top: 8px; display: flex; gap: 6px; justify-content: center; align-items: center; flex-wrap: wrap;">
-        <!-- Visitas Totais -->
-        <img src="https://api.visitorbadge.io/api/visitors?path=gerador-de-app-profissional.onrender.com-total&label=VISITAS&labelColor=%231e293b&countColor=%232563eb" alt="Visitas Totais">
-        <!-- Visitantes Únicos -->
-        <span id="uniqueBadgeContainer" style="display: inline-flex; align-items: center;"></span>
-      </div>
-      <script>
-        (function() {
-          var container = document.getElementById('uniqueBadgeContainer');
-          if (!container) return;
-          var cachedSvg = localStorage.getItem('chequetto_unique_svg');
-          if (cachedSvg) {
-            container.innerHTML = cachedSvg;
-          } else {
-            var url = "https://api.visitorbadge.io/api/visitors?path=gerador-de-app-profissional.onrender.com-uniques&label=%C3%9ANICOS&labelColor=%231e293b&countColor=%2310b981";
-            fetch(url)
-              .then(function(r) { return r.text(); })
-              .then(function(svg) {
-                if (svg && svg.indexOf('<svg') !== -1) {
-                  localStorage.setItem('chequetto_unique_svg', svg);
-                  container.innerHTML = svg;
-                }
-              })
-              .catch(function() {
-                container.innerHTML = '<img src="' + url + '" alt="Únicos">';
-              });
-          }
-        })();
-      </script>
-    </div>
+    <div class="bench__footer">Oficina v1.0</div>
   </aside>
+  <div class="visit-counter" id="visitCounter" title="Visitas totais · visitantes únicos"></div>
   <!-- ===================== PALCO / PREVIEW ===================== -->
   <main class="stage">
     <div class="stage__bar">
@@ -129,6 +99,7 @@
         <button class="device is-active" data-width="100%" title="Desktop" data-i18n="desktop">Desktop</button>
         <button class="device" data-width="768px" title="Tablet" data-i18n="tablet">Tablet</button>
         <button class="device" data-width="375px" title="Celular" data-i18n="mobile">Celular</button>
+        <button class="btn-ghost" id="btnAbrirVscode" type="button" title="Abre o código num editor completo, com destaque de sintaxe">🔷 Abrir com VS Code</button>
       </div>
       <div class="stage__actions">
         <button class="btn-ghost" id="btnShareWhatsapp" type="button">📲 WhatsApp</button>
@@ -147,6 +118,7 @@
       <div class="frame-wrap" id="frameWrap">
         <iframe id="previewFrame" hidden></iframe>
         <pre class="code-view" id="codeView" hidden><code id="codeViewText"></code></pre>
+        <div id="monacoContainer" class="monaco-container" hidden></div>
       </div>
       <div class="empty-state" id="emptyState">
         <div class="conversion-carousel" aria-live="polite">
@@ -285,6 +257,7 @@
 
 <script src="i18n.js?v=20260825-2"></script>
 <script src="script.js?v=20260825-2"></script>
+<script src="monaco-setup.js?v=20260825-2"></script>
 <script type="module" src="firebase-auth.js"></script>
 <script type="module" src="sandbox-real.js"></script>
 <script src="conta.js?v=20260825-2"></script>
