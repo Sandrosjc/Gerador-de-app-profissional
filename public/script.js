@@ -178,9 +178,6 @@ document.addEventListener('DOMContentLoaded', () => {
       el.previewFrame.src = URL.createObjectURL(blob);
     }
     if (el.codeViewText) el.codeViewText.textContent = html;
-    // Mantém o Monaco em sincronia se estiver aberto — sem isso, gerar/
-    // refinar por fora não apareceria pra quem está no modo VS Code.
-    if (window.chequettoMonaco?.estaAberto()) window.chequettoMonaco.atualizarConteudo(html);
     if (el.emptyState) el.emptyState.hidden = true;
     if (el.btnCopiar) el.btnCopiar.disabled = false;
     if (el.btnBaixar) el.btnBaixar.disabled = false;
@@ -782,53 +779,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
-
-  let modoVscodeAtivo = false;
-  let debounceMonaco = null;
-
-  function aoEditarNoMonaco(codigo) {
-    clearTimeout(debounceMonaco);
-    debounceMonaco = setTimeout(() => {
-      state.codigoAtual = codigo;
-      if (el.previewFrame) el.previewFrame.src = URL.createObjectURL(new Blob([codigo], { type: 'text/html' }));
-      if (el.codeViewText) el.codeViewText.textContent = codigo;
-      persistWorkspace();
-    }, 500);
-  }
-
-  document.getElementById('btnAbrirVscode')?.addEventListener('click', async (event) => {
-    const botao = event.currentTarget;
-    const monacoContainer = document.getElementById('monacoContainer');
-    modoVscodeAtivo = !modoVscodeAtivo;
-
-    if (modoVscodeAtivo) {
-      // entra no modo VS Code: esconde preview/código, mostra o Monaco
-      if (el.previewFrame) el.previewFrame.hidden = true;
-      if (el.codeView) el.codeView.hidden = true;
-      if (monacoContainer) monacoContainer.hidden = false;
-      botao.textContent = '🔶 Voltar pro Modo Visual';
-      try {
-        await window.chequettoMonaco?.abrir(state.codigoAtual || '', aoEditarNoMonaco);
-      } catch (error) {
-        // Proteção extra: mesmo que o Monaco falhe de um jeito inesperado
-        // (fora do try/catch interno dele), o resto do site continua
-        // funcionando normal — só volta pro modo visual e avisa.
-        console.warn('Falha ao abrir o VS Code:', error.message);
-        modoVscodeAtivo = false;
-        if (monacoContainer) monacoContainer.hidden = true;
-        if (el.previewFrame) el.previewFrame.hidden = false;
-        botao.textContent = '🔷 Abrir com VS Code';
-        alert('Não foi possível abrir o VS Code agora. O gerador principal continua funcionando normalmente.');
-      }
-    } else {
-      // volta pro modo visual: mostra a aba que estava ativa antes (padrão: Prévia)
-      if (monacoContainer) monacoContainer.hidden = true;
-      const abaAtiva = document.querySelector('.tab.is-active')?.getAttribute('data-view') || 'preview';
-      if (el.previewFrame) el.previewFrame.hidden = abaAtiva !== 'preview';
-      if (el.codeView) el.codeView.hidden = abaAtiva !== 'code';
-      botao.textContent = '🔷 Abrir com VS Code';
-    }
-  });
 
   if (el.btnBaixarZip) {
     el.btnBaixarZip.addEventListener('click', async () => {

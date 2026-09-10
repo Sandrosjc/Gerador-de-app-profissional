@@ -11,9 +11,13 @@
   <!-- ===================== BANCADA ESQUERDA ===================== -->
   <aside class="bench">
     <div class="bench__brand">
-      <div class="brand__mark">C</div>
+      <div class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
       <div>
-        <p class="brand__title">CHEQUETTO</p>
+        <p class="brand__title">Chequetto</p>
         <p class="brand__subtitle" id="apiStatus">verificando servidor...</p>
       </div>
       <label class="language-picker" for="languageSelector">
@@ -98,7 +102,6 @@
         <button class="device is-active" data-width="100%" title="Desktop" data-i18n="desktop">Desktop</button>
         <button class="device" data-width="768px" title="Tablet" data-i18n="tablet">Tablet</button>
         <button class="device" data-width="375px" title="Celular" data-i18n="mobile">Celular</button>
-        <button class="btn-ghost" id="btnAbrirVscode" type="button" title="Abre o código num editor completo, com destaque de sintaxe">🔷 Abrir com VS Code</button>
       </div>
       <div class="stage__actions">
         <button class="btn-ghost" id="btnShareWhatsapp" type="button">📲 WhatsApp</button>
@@ -117,7 +120,6 @@
       <div class="frame-wrap" id="frameWrap">
         <iframe id="previewFrame" hidden></iframe>
         <pre class="code-view" id="codeView" hidden><code id="codeViewText"></code></pre>
-        <div id="monacoContainer" class="monaco-container" hidden></div>
       </div>
       <div class="empty-state" id="emptyState">
         <div class="conversion-carousel" aria-live="polite">
@@ -256,7 +258,6 @@
 
 <script src="i18n.js?v=20260825-2"></script>
 <script src="script.js?v=20260825-2"></script>
-<script src="monaco-setup.js?v=20260825-2"></script>
 <script type="module" src="firebase-auth.js"></script>
 <script type="module" src="sandbox-real.js"></script>
 <script src="conta.js?v=20260825-2"></script>
