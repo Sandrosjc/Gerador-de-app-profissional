@@ -7,30 +7,48 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<header class="topnav">
+  <div class="topnav__brand">
+    <div class="brand__mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div>
+      <p class="brand__title">Chequetto</p>
+      <p class="brand__subtitle" id="apiStatus">verificando servidor...</p>
+    </div>
+  </div>
+  <nav class="topnav__menu" aria-label="Navegação principal">
+    <button class="topnav__item is-active" data-page="inicio" type="button">🏠 Início</button>
+    <button class="topnav__item" data-page="projetos" type="button">📁 Projetos</button>
+    <button class="topnav__item" data-page="conhecimento" type="button">📖 Conhecimento</button>
+    <button class="topnav__item" data-page="ia" type="button">✨ IA</button>
+    <button class="topnav__item" data-page="biblioteca" type="button">📚 Biblioteca</button>
+    <button class="topnav__item" data-page="config" type="button">⚙️ Configurações</button>
+  </nav>
+  <div class="topnav__user">
+    <button class="topnav__icon-btn" id="btnDarkMode" type="button" title="Alternar tema claro/escuro">🌙</button>
+    <button class="topnav__icon-btn" id="btnNotificacoes" type="button" title="Em breve">🔔</button>
+    <label class="language-picker" for="languageSelector">
+      <span class="sr-only">Idioma</span>
+      <span class="language-picker__flags" aria-label="Escolher idioma">
+        <button class="language-picker__flag" type="button" data-language="en" title="English" aria-label="English">🇺🇸</button>
+        <button class="language-picker__flag" type="button" data-language="pt" title="Português" aria-label="Português">🇧🇷</button>
+      </span>
+      <select id="languageSelector" aria-label="Idioma">
+        <option value="pt">PT</option><option value="en">EN</option><option value="es">ES</option><option value="fr">FR</option><option value="de">DE</option><option value="it">IT</option><option value="ja">JA</option><option value="zh">中文</option><option value="ko">한국어</option><option value="ru">RU</option><option value="ar">AR</option><option value="hi">HI</option>
+      </select>
+    </label>
+    <div id="accountArea"></div>
+  </div>
+</header>
 <div class="shell">
   <!-- ===================== BANCADA ESQUERDA ===================== -->
   <aside class="bench">
-    <div class="bench__brand">
-      <div class="brand__mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M5 12.5L9.5 17L19 7" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <div>
-        <p class="brand__title">Chequetto</p>
-        <p class="brand__subtitle" id="apiStatus">verificando servidor...</p>
-      </div>
-      <label class="language-picker" for="languageSelector">
-        <span class="sr-only">Idioma</span>
-        <span class="language-picker__flags" aria-label="Escolher idioma">
-          <button class="language-picker__flag" type="button" data-language="en" title="English" aria-label="English">🇺🇸</button>
-          <button class="language-picker__flag" type="button" data-language="pt" title="Português" aria-label="Português">🇧🇷</button>
-        </span>
-        <select id="languageSelector" aria-label="Idioma">
-          <option value="pt">PT</option><option value="en">EN</option><option value="es">ES</option><option value="fr">FR</option><option value="de">DE</option><option value="it">IT</option><option value="ja">JA</option><option value="zh">中文</option><option value="ko">한국어</option><option value="ru">RU</option><option value="ar">AR</option><option value="hi">HI</option>
-        </select>
-      </label>
-      <div id="accountArea"></div>
+    <div class="bench__brand bench__brand--compact">
+      <span class="bench__brand-label">SUPER PLATFORM 2026</span>
+      <span class="eyebrow__status">● ONLINE</span>
     </div>
     <div class="workspace-nav" aria-label="Navegação do workspace">
       <button class="workspace-nav__item is-active" type="button"><span>✦</span> Criar aplicativo</button>
@@ -143,7 +161,24 @@
       <button class="btn-secondary" id="btnRefinar" disabled data-i18n="refine">Aplicar alteração</button>
     </div>
   </main>
+  <aside class="icon-rail" aria-label="Ferramentas">
+    <button class="icon-rail__item" data-rail="componentes" title="Componentes" type="button">🧩</button>
+    <button class="icon-rail__item" data-rail="telas" title="Telas" type="button">🖥️</button>
+    <button class="icon-rail__item" data-rail="codigo" title="Código" type="button">💻</button>
+    <button class="icon-rail__item" data-rail="deploy" title="Deploy" type="button">🚀</button>
+    <button class="icon-rail__item" data-rail="publicacao" title="Publicação" type="button">☁️</button>
+    <button class="icon-rail__item" data-rail="banco" title="Banco de dados" type="button">🗄️</button>
+    <button class="icon-rail__item" data-rail="ia" title="IA" type="button">✨</button>
+    <button class="icon-rail__item" data-rail="arquivos" title="Arquivos" type="button">📄</button>
+    <button class="icon-rail__item" data-rail="tarefas" title="Tarefas" type="button">✅</button>
+    <button class="icon-rail__item" data-rail="aprendizagem" title="Aprendizagem" type="button">🎓</button>
+    <button class="icon-rail__item" data-rail="feedback" title="Feedback" type="button">💬</button>
+  </aside>
 </div>
+<footer class="site-footer">
+  <span>🟢 Chequetto Estúdio · Criando o futuro, um app de cada vez.</span>
+  <span class="site-footer__links"><a href="#" data-rail="feedback">Suporte</a> | <a href="#">Termos</a> | <a href="#">Privacidade</a></span>
+</footer>
 
 <!-- ===================== JANELA DE PLANOS ===================== -->
 <div class="ide-overlay" id="ideOverlay" hidden>

@@ -242,6 +242,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
   restoreWorkspace();
 
+  // Navegação nova (barra de cima + trilha de ícones): itens com função de
+  // verdade são ligados nas ações que já existem; o resto avisa "em breve"
+  // em vez de fingir que faz algo — mais honesto que deixar morto sem avisar.
+  const ACOES_NAVEGACAO = {
+    projetos: () => document.getElementById('btnMeusProjetos')?.click(),
+    publicacao: () => document.getElementById('btnPublicarGithub')?.click(),
+    arquivos: () => document.getElementById('btnBaixarZip')?.click(),
+    codigo: () => document.querySelector('.tab[data-view="sandbox"]')?.click(),
+    ia: () => el.prompt?.focus(),
+    inicio: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
+  };
+
+  document.querySelectorAll('[data-page], [data-rail]').forEach((botao) => {
+    botao.addEventListener('click', (event) => {
+      const chave = botao.getAttribute('data-page') || botao.getAttribute('data-rail');
+      if (ACOES_NAVEGACAO[chave]) {
+        if (botao.hasAttribute('data-page')) {
+          document.querySelectorAll('.topnav__item').forEach((item) => item.classList.remove('is-active'));
+          botao.classList.add('is-active');
+        }
+        ACOES_NAVEGACAO[chave]();
+      } else {
+        event.preventDefault();
+        alert('Essa parte ainda não existe — chega em breve. 🚧');
+      }
+    });
+  });
+
+  // Modo claro/escuro — de verdade, não só visual. Lembra a escolha.
+  const temaGuardado = localStorage.getItem('chequetto_tema');
+  if (temaGuardado === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  document.getElementById('btnDarkMode')?.addEventListener('click', () => {
+    const escuro = document.documentElement.getAttribute('data-theme') === 'dark';
+    if (escuro) {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('chequetto_tema', 'light');
+    } else {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('chequetto_tema', 'dark');
+    }
+  });
+
   // Contador de visitas (canto inferior esquerdo, fixo na tela) — registra
   // 1 visita só no carregamento da página, depois atualiza os números
   // periodicamente (sem contar visita nova a cada atualização).
@@ -424,6 +466,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   el.prompt?.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      el.btnGerar?.click();
+      return;
+    }
+    // No modo Planejamento é uma conversa — Enter sozinho envia (como
+    // qualquer chat normal), Shift+Enter quebra linha. Na Construção mantém
+    // só Ctrl+Enter, porque ali a pessoa costuma escrever descrições
+    // detalhadas em várias linhas e Enter sozinho atrapalharia.
+    if (modoAtual === 'planejar' && event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       el.btnGerar?.click();
     }
